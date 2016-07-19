@@ -108,6 +108,7 @@ int main()
 	double* vT_eff = new double[N_grids];			// Surface mass density vector
 	double* vT_c = new double[N_grids];			// Surface mass density vector
 	double* vT_irr = new double[N_grids];			// Surface mass density vector
+	double* vT_sur = new double[N_grids];			// Surface mass density vector
 	double* vdelta_T = new double[N_grids];			// Surface mass density vector
 	double* vH = new double[N_grids];
 	double dT;
@@ -115,18 +116,6 @@ int main()
 	vM_dot[N_grids - 1] = M_dot_boundary;
 	vM_dot[N_grids - 2] = M_dot_boundary;
 
-	/*array_view<double, 1> R(N_grids, vR);
-	array_view<double, 1> X(N_grids, vX);
-	array_view<double, 1> E(N_grids, vE);
-	array_view<double, 1> S(N_grids, vS);
-	array_view<double, 1> V(N_grids, vV);
-	array_view<double, 1> M_dot(N_grids, vM_dot);
-	array_view<double, 1> E_new(N_grids, vE_new);
-	array_view<double, 1> S_new(N_grids, vS_new);
-	array_view<double, 1> V_new(N_grids, vV_new);
-	array_view<double, 1> T_eff(N_grids, vT_eff);
-	array_view<double, 1> deltaT(N_grids, vdelta_T);
-	array_view<double, 1> J_total(1, &vJ_total);*/
 
 	
 	// Create initial conditions******************************************************************************************************************************
@@ -165,15 +154,22 @@ int main()
 			vT_eff[i] = 0;
 		if (vM_dot[i] >= 0)
 			vT_c[i] = pow(3 * OpticalThickness(vE[i]) * pow(vT_eff[i], 4) / 4, 0.25);
-			//vT_c[i] = pow(9 * OpticalThickness(vS[i] / vX[i]) * G * M_compact * vM_dot[i] / (32 * PI * a * pow(vX[i], 6)) * (1 - sqrt(X_isco / pow(vX[i], 2))), 0.25);
+			
 		else
 			vT_c[i] = 0;
 		vH[i] = sqrt((vT_c[i] * k * pow(vR[i], 3)) / (mu_p * m_p * G * M_compact));
 	});
-	ExtractSpectrum(vT_eff, vX, delta_X, N_grids, 0, 15000, 1, false);
 
 	L_instant = (vM_dot[0] * G * M_compact) / (2 * R_isco);		// Luminosity in ergs/s
+
 	vT_irr = IrradiationTemperature(N_grids, 1, 0.5, L_instant, vR, vH);
+
+	parallel_for(0, N_grids, [=](int i)
+	{
+		vT_sur[i] = pow(pow(vT_irr[i], 4) + pow(vT_eff[i], 4), 0.25);
+	});
+
+	ExtractSpectrum(vT_eff, vX, delta_X, N_grids, 1, 15000, 1, false);
 
 	WriteGraphData(vR, vT_irr, N_grids - 1, "TirrvsR.txt", false);
 	WriteGraphData(vR, vE, N_grids, "EvsR.txt", false);
@@ -182,6 +178,7 @@ int main()
 	WriteGraphData(vR, vT_eff, N_grids-1, "TeffvsR.txt", false);
 	WriteGraphData(vR, vT_c, N_grids - 1, "TcvsR.txt", false);
 	WriteGraphData(vR, vH, N_grids, "HvsR.txt", false);
+	WriteGraphData(vR, vT_sur, N_grids - 1, "TsurvsR.txt", false);
 
 
 
@@ -308,14 +305,22 @@ int main()
 				vH[i] = sqrt((vT_c[i] * k * pow(vR[i], 3)) / (mu_p * m_p * G * M_compact));
 			});
 
-			ExtractSpectrum(vT_eff, vX, delta_X, N_grids, 0, 15000, 1, true);
 			vT_irr = IrradiationTemperature(N_grids, 1, 0.5, L_instant, vR, vH);
+
+			parallel_for(0, N_grids, [=](int i)
+			{
+				vT_sur[i] = pow(pow(vT_irr[i], 4) + pow(vT_eff[i], 4), 0.25);
+			});
+
+			ExtractSpectrum(vT_eff, vX, delta_X, N_grids, 1, 15000, 1, true);
+
 			WriteGraphData(vR, vE, N_grids, "EvsR.txt", true);
 			WriteGraphData(vR, vV, N_grids, "VvsR.txt", true);
 			WriteGraphData(vR, vM_dot, N_grids- 1, "MdotvsR.txt", true);
 			WriteGraphData(vR, vT_eff, N_grids - 1, "TeffvsR.txt", true);
 			WriteGraphData(vR, vT_c, N_grids - 1, "TcvsR.txt", true);
 			WriteGraphData(vR, vT_irr, N_grids - 1, "TirrvsR.txt", true);
+			WriteGraphData(vR, vT_sur, N_grids - 1, "TsurvsR.txt", true);
 			WriteGraphData(vR, vH, N_grids, "HvsR.txt", true);
 			end = std::chrono::high_resolution_clock::now();
 			elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
@@ -382,8 +387,10 @@ void ExtractSpectrum(double* T, double* X, double delta_X, int N_grids, double m
 	{
 		parallel_for(0, numberofchannels, [=](int j)
 		{
-			I_bb[j] += (2 * h * pow(eVtoHz(eV[j]), 3) / pow(c, 2)) / (exp((h * eVtoHz(eV[j])) /
-				(k * T[i]))) * 4 * PI * pow(X[i], 3) * delta_X; // infinitesimal area
+			if(T[i] != 0)
+				I_bb[j] += (2 * h * pow(eVtoHz(eV[j]), 3) / pow(c, 2)) / (exp((h * eVtoHz(eV[j])) /
+					(k * T[i])) - 1)
+					* 4 * PI * pow(X[i], 3) * delta_X; // infinitesimal area
 		});
 	});
 	WriteGraphData(eV, I_bb, numberofchannels, "powerspectrum.txt", append);
@@ -398,7 +405,10 @@ double* IrradiationTemperature(int N_grids, double nu, double epsilon, double L,
 	parallel_for(0, N_grids - 1, [=](int i) 
 	{
 		double C = nu * (1 - epsilon)*((H[i + 1] - H[i]) / (R[i + 1] - R[i]) - H[i] / R[i]);
-		T_irr[i] = pow(C * L / (4 * PI * a * R[i]), 0.25);
+		if (C > 0)
+			T_irr[i] = pow(C * L / (4 * PI * a * R[i]), 0.25);
+		else
+			T_irr[i] = 0;
 	});
 	return T_irr;
 }
