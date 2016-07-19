@@ -1,20 +1,23 @@
 #include "stdafx.h"
 #include <fstream>
 #include <iostream>
-#include <amp_math.h>
+//#include <amp_math.h>
 #include <algorithm>
-#include <amp.h>
+//#include <amp.h>
 #include <ppl.h>
 #include <chrono>
 
-using namespace ::std;
+using namespace std;
 using namespace ::Concurrency;
-using namespace ::Concurrency::fast_math;
+//using namespace ::Concurrency::fast_math;
 
+double OpticalThickness(double SurfaceDensity);
 double NormalizationGaussian(double Mu, double Sigma, double R_isco, double R_outer, double M_disk);
 void WriteGraphData(double* X, double* Y, int length, string filename, bool append);
-void WriteGraphData(array_view<double, 1> X, array_view<double, 1> Y, int length, string filename, bool append);
-void Inverse(array_view<double, 2> A, int length);
+double eVtoHz(double eV);
+void ExtractSpectrum(double* T, double* X, double delta_X, int N_grids, double minEnergyEV, double maxEnergyEV, double resolutionEV, bool append);
+double* IrradiationTemperature(int N_grids, double nu, double epsilon, double L, double* R, double* H);
+double* IrradiationTemperaturePower_4(int N_grids, double nu, double epsilon, double L, double* R, double* H);
 
 int main()
 {
@@ -56,12 +59,12 @@ int main()
 	double T = 0;
 	double L_instant = 0;
 
-	cout << "Accretion disk simulation with C++ AMP\n\n";
-	accelerator acc;
+	cout << "Accretion disk simulation with parallel CPU computing.\n\n";
+	/*accelerator acc;
 
 	wcout << "Default accelerator is: " << acc.description << "\n";
 	wcout << "Accelerator memory is: " << acc.get_dedicated_memory() << " kB\n";
-	wcout << "Supports double precision operations: " << acc.get_supports_double_precision() << "\n\n";
+	wcout << "Supports double precision operations: " << acc.get_supports_double_precision() << "\n\n";*/
 
 	cout << "Please enter the mass of the compact object. (M_solar)\n";
 	double n; cin >> n;
@@ -94,21 +97,25 @@ int main()
 
 	// Create vectors
 	double* vE = new double[N_grids];			// Surface mass density vector
-	double*  vE_new = new double[N_grids];		// Next surface mass density vector
-	double*  vR = new double[N_grids];			// Radius
-	double*  vS = new double[N_grids];
-	double*  vS_new = new double[N_grids];
-	double*  vX = new double[N_grids];
-	double*  vM_dot = new double[N_grids];
-	double*  vV = new double[N_grids];			// Viscosity
-	double*  vV_new = new double[N_grids];
+	double* vE_new = new double[N_grids];		// Next surface mass density vector
+	double* vR = new double[N_grids];			// Radius
+	double* vS = new double[N_grids];
+	double* vS_new = new double[N_grids];
+	double* vX = new double[N_grids];
+	double* vM_dot = new double[N_grids];
+	double* vV = new double[N_grids];			// Viscosity
+	double* vV_new = new double[N_grids];
 	double* vT_eff = new double[N_grids];			// Surface mass density vector
+	double* vT_c = new double[N_grids];			// Surface mass density vector
+	double* vT_irr = new double[N_grids];			// Surface mass density vector
 	double* vdelta_T = new double[N_grids];			// Surface mass density vector
+	double* vH = new double[N_grids];
 	double dT;
 	double vJ_total = 0;
+	vM_dot[N_grids - 1] = M_dot_boundary;
 	vM_dot[N_grids - 2] = M_dot_boundary;
 
-	array_view<double, 1> R(N_grids, vR);
+	/*array_view<double, 1> R(N_grids, vR);
 	array_view<double, 1> X(N_grids, vX);
 	array_view<double, 1> E(N_grids, vE);
 	array_view<double, 1> S(N_grids, vS);
@@ -119,7 +126,7 @@ int main()
 	array_view<double, 1> V_new(N_grids, vV_new);
 	array_view<double, 1> T_eff(N_grids, vT_eff);
 	array_view<double, 1> deltaT(N_grids, vdelta_T);
-	array_view<double, 1> J_total(1, &vJ_total);
+	array_view<double, 1> J_total(1, &vJ_total);*/
 
 	
 	// Create initial conditions******************************************************************************************************************************
@@ -135,39 +142,53 @@ int main()
 
 	double E_0 = NormalizationGaussian(Mu, Sigma, R_isco, R_outer, M_disk);
 
-	parallel_for_each(R.extent, [=](index<1> idx) restrict(amp)
+	parallel_for(0, N_grids,[=](int i)
 	{
-		X(idx[0]) = X_isco + idx[0] * delta_X;
-		M_dot(idx[0]) = 0;
+		vX[i] = X_isco + i * delta_X;
+		vM_dot[i] = 0;
 	});
-	X.synchronize();
-	parallel_for_each(R.extent, [=](index<1> idx) restrict(amp) 
+
+	parallel_for(0, N_grids, [=, &vJ_total](int i)
 	{  
-		R(idx) = X(idx)*X(idx);
-		E(idx) = E_0 * exp(-1 * (pow((R(idx) - Mu), 2.)) / (2. * pow(Sigma, 2.)));
-		S(idx) = X(idx)*E(idx);
-		V(idx) = VIS_C * pow(X(idx), (4. / 3.)) * pow(S(idx), (2. / 3.));
-		J_total(0) += 4 * PI * sqrt(G * M_compact) * X(idx) * S(idx) * delta_X;
+		vR[i] = vX[i]*vX[i];
+		vE[i] = E_0 * exp(-1 * (pow((vR[i] - Mu), 2.)) / (2. * pow(Sigma, 2.)));
+		vS[i] = vX[i]*vE[i];
+		vV[i] = VIS_C * pow(vX[i], (4. / 3.)) * pow(vS[i], (2. / 3.));
+		vJ_total += 4 * PI * sqrt(G * M_compact) * vX[i] * vS[i] * delta_X;
 	});
-	Concurrency::extent<1> ext(N_grids - 2);
-	parallel_for_each(ext, [=](index<1> idx) restrict(amp)
+	parallel_for(0, N_grids - 2, [=](int i)
 	{
-		M_dot(idx[0]) = 3. * PI * (V(idx[0] + 1) * S(idx[0] + 1) - V(idx[0]) * S(idx[0])) / delta_X;
-		if (M_dot(idx[0]) >= 0)
-			T_eff(idx[0]) = pow(3 * G * M_compact * M_dot(idx[0]) / (8 * PI * a * pow(X(idx[0]), 6)) * (1 - sqrt(X_isco / pow(X(idx[0]), 2))), 0.25);
+		vM_dot[i] = 3. * PI * (vV[i + 1] * vS[i + 1] - vV[i] * vS[i]) / delta_X;
+		if (vM_dot[i] >= 0)
+			vT_eff[i] = pow(3 * G * M_compact * vM_dot[i] / (8 * PI * a * pow(vX[i], 6)) * (1 - sqrt(X_isco / pow(vX[i], 2))), 0.25);
 		else
-			T_eff(idx[0]) = 0;
+			vT_eff[i] = 0;
+		if (vM_dot[i] >= 0)
+			vT_c[i] = pow(3 * OpticalThickness(vE[i]) * pow(vT_eff[i], 4) / 4, 0.25);
+			//vT_c[i] = pow(9 * OpticalThickness(vS[i] / vX[i]) * G * M_compact * vM_dot[i] / (32 * PI * a * pow(vX[i], 6)) * (1 - sqrt(X_isco / pow(vX[i], 2))), 0.25);
+		else
+			vT_c[i] = 0;
+		vH[i] = sqrt((vT_c[i] * k * pow(vR[i], 3)) / (mu_p * m_p * G * M_compact));
 	});
-	WriteGraphData(R, E, N_grids, "EvsR.txt", false);
-	WriteGraphData(R, S, N_grids, "SvsR.txt", false);
-	WriteGraphData(R, V, N_grids, "VvsR.txt", false);
-	WriteGraphData(R, M_dot, N_grids-1, "MdotvsR.txt", false);
-	WriteGraphData(R, T_eff, N_grids-1, "TeffvsR.txt", false);
+	ExtractSpectrum(vT_eff, vX, delta_X, N_grids, 0, 15000, 1, false);
+
+	L_instant = (vM_dot[0] * G * M_compact) / (2 * R_isco);		// Luminosity in ergs/s
+	vT_irr = IrradiationTemperature(N_grids, 1, 0.5, L_instant, vR, vH);
+
+	WriteGraphData(vR, vT_irr, N_grids - 1, "TirrvsR.txt", false);
+	WriteGraphData(vR, vE, N_grids, "EvsR.txt", false);
+	WriteGraphData(vR, vV, N_grids, "VvsR.txt", false);
+	WriteGraphData(vR, vM_dot, N_grids-1, "MdotvsR.txt", false);
+	WriteGraphData(vR, vT_eff, N_grids-1, "TeffvsR.txt", false);
+	WriteGraphData(vR, vT_c, N_grids - 1, "TcvsR.txt", false);
+	WriteGraphData(vR, vH, N_grids, "HvsR.txt", false);
+
+
 
 	auto end = std::chrono::high_resolution_clock::now();
 	auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 	cout << "Initial conditions created in " <<	elapsed.count() << " ms.\n";
-	cout << "Total angular momentum is " << J_total(0) << " g cm2 s-1.\n";
+	cout << "Total angular momentum is " << vJ_total << " g cm2 s-1.\n";
 	//********************************************************************
 	//********************************************************************
 
@@ -186,14 +207,14 @@ int main()
 	int j = 0;
 	start = chrono::high_resolution_clock::now();
 
-	FILE* file;
-	file = fopen("lightcurve.txt", "w");
+	ofstream file;
+	file.open("lightcurve.txt", ios::out);
 	while (T < T_max)
 	{
 		// Determine outer boundary condition*************************************************************
 		//************************************************************************************************
-		S[N_grids - 1] = pow(((M_dot[N_grids - 2] * delta_X / (3. * PI) + S[N_grids - 2] * V[N_grids - 2]) 
-			/ (VIS_C * pow(X[N_grids - 1], (4. / 3.)))), 
+		vS[N_grids - 1] = pow(((vM_dot[N_grids - 2] * delta_X / (3. * PI) + vS[N_grids - 2] * vV[N_grids - 2]) 
+			/ (VIS_C * pow(vX[N_grids - 1], (4. / 3.)))), 
 			(3. / 5.));
 		//************************************************************************************************
 		//************************************************************************************************
@@ -201,11 +222,10 @@ int main()
 		// Determine time step****************************************************************************
 		//************************************************************************************************
 
-		parallel_for_each(deltaT.extent, [=](index<1> idx) restrict(amp)
+		parallel_for(0, N_grids, [=] (int i)
 		{
-			deltaT(idx) = (1. / 6.) * (pow(delta_X * X(idx), 2) / V(idx)) / 0.75;
+			vdelta_T[i] = (1. / 6.) * (pow(delta_X * vX[i], 2) / vV[i]) / 0.75;
 		});
-		deltaT.synchronize();
 		dT = *min_element(vdelta_T, vdelta_T + N_grids);
 		
 		//************************************************************************************************
@@ -213,37 +233,32 @@ int main()
 
 		// Iterate in radial coordinate ******************************************************************
 		//************************************************************************************************
-		Concurrency::extent<1> ext2(N_grids - 2);
-		parallel_for_each(ext2, [=](index<1> idx) restrict(amp)
+		//Concurrency::extent<1> ext2(N_grids - 2);
+		parallel_for(0, N_grids - 2, [=](int i)
 		{
 			
-			S_new(idx[0] + 1) = S(idx[0] + 1) + 0.75 * dT / pow((X(idx[0] + 1) * delta_X), 2) *
-				(V(idx[0] + 2) * S(idx[0] + 2) + V(idx[0]) * S(idx[0]) - 2. * V(idx[0] + 1) * S(idx[0] + 1));
-			V_new(idx[0] + 1) = VIS_C * pow(X(idx[0] + 1), (4./3.)) * pow(S_new(idx[0] + 1), (2. / 3.));
+			vS_new[i + 1] = vS[i + 1] + 0.75 * dT / pow((vX[i + 1] * delta_X), 2) *
+				(vV[i + 2] * vS[i + 2] + vV[i] * vS[i] - 2. * vV[i + 1] * vS[i + 1]);
+			vV_new[i + 1] = VIS_C * pow(vX[i + 1], (4./3.)) * pow(vS_new[i + 1], (2. / 3.));
 		});
 		//*************************************************************************************************
 		//*************************************************************************************************
 
 		// Obtain new values*******************************************************************************
 		//*************************************************************************************************
-		parallel_for_each(ext2, [=](index<1> idx) restrict(amp)
+		parallel_for(0, N_grids - 2, [=](int i)
 		{
-			S(idx[0] + 1) = S_new(idx[0] + 1);
-			V(idx[0] + 1) = V_new(idx[0] + 1);
+			vS[i + 1] = vS_new[i + 1];
+			vV[i + 1] = vV_new[i + 1];
 		});
 		//*************************************************************************************************
 		//*************************************************************************************************
 
 		// Obtain new M_dot values ************************************************************************
 		//*************************************************************************************************
-		Concurrency::extent<1> ext3(N_grids - 2);
-		parallel_for_each(ext3, [=](index<1> idx) restrict(amp)
+		parallel_for(0, N_grids - 2, [=](int i)
 		{
-			M_dot(idx[0]) = 3. * PI * (V(idx[0] + 1) * S(idx[0] + 1) - V(idx[0]) * S(idx[0])) / delta_X;
-			if (M_dot(idx[0]) >= 0)
-				T_eff(idx[0]) = pow(3 * G * M_compact * M_dot(idx[0]) / (8 * PI*a*pow(X(idx[0]), 6)) * (1 - sqrt(X_isco / pow(X(idx[0]), 2))), 0.25);
-			else
-				T_eff(idx[0]) = 0;
+			vM_dot[i] = 3. * PI * (vV[i + 1] * vS[i + 1] - vV[i] * vS[i]) / delta_X;
 		});
 		//*************************************************************************************************
 		//*************************************************************************************************
@@ -251,22 +266,57 @@ int main()
 
 		T += dT; // Increase time
 
-		L_instant = (M_dot(0) * G * M_compact) / (2 * R_isco); // Luminosity in ergs/s
-		fprintf(file, "%lf\t%lf\n", T, L_instant);
+		L_instant = (vM_dot[0] * G * M_compact) / (2 * R_isco);		// Luminosity in ergs/s
+		file << T << "\t" << L_instant << "\n";						// Write luminosity to file
 
 		// Take samples ***********************************************************************************
 		//*************************************************************************************************
 		if (T >= vT_sample[j])
 		{
 			j++;
-			parallel_for_each(R.extent, [=](index<1> idx) restrict(amp)
+
+			// Obtain E values for central temperature*********************************************************
+			//*************************************************************************************************
+			parallel_for(0, N_grids, [=](int i)
 			{
-				E(idx) = S(idx) / X(idx);
+				vE[i] = vS[i] / vX[i];
 			});
-			WriteGraphData(R, E, N_grids, "EvsR.txt", true);
-			WriteGraphData(R, V, N_grids, "VvsR.txt", true);
-			WriteGraphData(R, M_dot, N_grids- 1, "MdotvsR.txt", true);
-			WriteGraphData(R, T_eff, N_grids - 1, "TeffvsR.txt", true);
+			//*************************************************************************************************
+			//*************************************************************************************************
+
+			parallel_for(0, N_grids, [=] (int i)
+			{
+				// Obtain effective temperature ***********************************************************************************************
+				//***************************************************************************************************************************
+				if (vM_dot[i] >= 0)
+					vT_eff[i] = pow(3 * G * M_compact * vM_dot[i] / (8 * PI * a * pow(vX[i], 6)) * (1 - sqrt(X_isco / pow(vX[i], 2))), 0.25);
+				else
+					vT_eff[i] = 0;
+				//***************************************************************************************************************************
+				//***************************************************************************************************************************
+
+				// Obtain central temperature ***********************************************************************************************
+				//***************************************************************************************************************************
+				if (vM_dot[i] >= 0)
+					vT_c[i] = pow(3 * OpticalThickness(vE[i]) * pow(vT_eff[i], 4) / 4, 0.25);
+				//vT_c[i] = pow(9 * OpticalThickness(vS[i] / vX[i]) * G * M_compact * vM_dot[i] / (32 * PI * a * pow(vX[i], 6)) * (1 - sqrt(X_isco / pow(vX[i], 2))), 0.25);
+				else
+					vT_c[i] = 0;
+				//***************************************************************************************************************************
+				//***************************************************************************************************************************
+
+				vH[i] = sqrt((vT_c[i] * k * pow(vR[i], 3)) / (mu_p * m_p * G * M_compact));
+			});
+
+			ExtractSpectrum(vT_eff, vX, delta_X, N_grids, 0, 15000, 1, true);
+			vT_irr = IrradiationTemperature(N_grids, 1, 0.5, L_instant, vR, vH);
+			WriteGraphData(vR, vE, N_grids, "EvsR.txt", true);
+			WriteGraphData(vR, vV, N_grids, "VvsR.txt", true);
+			WriteGraphData(vR, vM_dot, N_grids- 1, "MdotvsR.txt", true);
+			WriteGraphData(vR, vT_eff, N_grids - 1, "TeffvsR.txt", true);
+			WriteGraphData(vR, vT_c, N_grids - 1, "TcvsR.txt", true);
+			WriteGraphData(vR, vT_irr, N_grids - 1, "TirrvsR.txt", true);
+			WriteGraphData(vR, vH, N_grids, "HvsR.txt", true);
 			end = std::chrono::high_resolution_clock::now();
 			elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 			cout << "Current time step is " << dT << " s.\n";
@@ -275,7 +325,9 @@ int main()
 		//*************************************************************************************************
 		//*************************************************************************************************
 	}
-	fclose(file);
+	file.close();
+	cout << "All done!";
+	cin.get();
 	cin.get();
 	return 0;
 }
@@ -287,21 +339,6 @@ double NormalizationGaussian(double Mu, double Sigma, double R_isco, double R_ou
 		- Mu * sqrt(2 * PI) * erf((R_isco - Mu) / (sqrt(2) * Sigma)) + Mu * sqrt(2 * PI) * erf((R_outer - Mu) / (sqrt(2) * Sigma)));
 	double E_0 = M_disk / (2 * PI * IntegralResult);
 	return E_0;
-}
-
-void WriteGraphData(array_view<double, 1> X, array_view<double, 1> Y, int length, string filename, bool append)
-{
-	FILE* file;
-	if(!append)
-		file = fopen(filename.c_str(), "w");
-	else
-		file = fopen(filename.c_str(), "a");
-	parallel_for(0, length, [=, &file](int i)
-	{
-		fprintf(file, "%lf\t%lf\n", X[i], Y[i]);
-	});
-	fprintf(file, "\n");
-	fclose(file);
 }
 
 void WriteGraphData(double* X, double* Y, int length, string filename, bool append)
@@ -318,48 +355,69 @@ void WriteGraphData(double* X, double* Y, int length, string filename, bool appe
 	fprintf(file, "\n");
 	fclose(file);
 }
-void Inverse(array_view<double, 2> A, int length)
+
+double OpticalThickness(double SurfaceDensity)
 {
-	for (int i = 0; i < length; i++)
-	{
-		for (int j = 0; j < length; j++)
-		{
-			cout << A(i, j) << "\t";
-		}
-		cout << "\n";
-	}
+	const double thompson = 6.6524e-25;                                  // (thompson cross-section for electron) cm-2
+	const double m_p = 1.6726231e-24;                                    // (mass of proton) g
+	double Opacity = thompson / m_p;
+	return SurfaceDensity * Opacity;
+}
 
-	for (int i = 1; i < length; i++)
+void ExtractSpectrum(double* T, double* X, double delta_X, int N_grids, double minEnergyEV, double maxEnergyEV, double resolutionEV, bool append)
+{
+	const double k = 1.380658e-16;                                       // (boltzmann's constant) erg K-1
+	const double c = 2.99792458e10;                                      // (speed of light) cm / s
+	const double h = 6.6260755e-27;                                      // (planck's constant) erg s
+	const double PI = 3.14159265358979323846;
+	int numberofchannels = (maxEnergyEV - minEnergyEV) / resolutionEV;
+	double* I_bb = new double[numberofchannels];
+	double* eV = new double[numberofchannels];
+	parallel_for(0, numberofchannels, [=](int i)
 	{
-		for(int j = 0; j < i; j++)
+		I_bb[i] = 0;
+		eV[i] = minEnergyEV + resolutionEV * i;
+	});
+	parallel_for(0, N_grids, [=](int i)
+	{
+		parallel_for(0, numberofchannels, [=](int j)
 		{
-			parallel_for_each(A.extent, [=](index<2> idx) restrict(amp)
-			{
-				if (A(j, j) != 0)
-					A(i, idx[1]) -= (A(i, j) / A(j, j)) * A(j, idx[1]);
+			I_bb[j] += (2 * h * pow(eVtoHz(eV[j]), 3) / pow(c, 2)) / (exp((h * eVtoHz(eV[j])) /
+				(k * T[i]))) * 4 * PI * pow(X[i], 3) * delta_X; // infinitesimal area
+		});
+	});
+	WriteGraphData(eV, I_bb, numberofchannels, "powerspectrum.txt", append);
+}
+// Point source assumed
+double* IrradiationTemperature(int N_grids, double nu, double epsilon, double L, double* R, double* H)
+{
+	const double a = 5.67051e-5;                                         // (stefan boltzmann constant) erg cm-2 K-4 s-1
+	const double PI = 3.14159265358979323846;
 
-				if (A(i, idx[1]) < 1e-9 && A(i, idx[1]) > -1e-9)
-					A(i, idx[1]) = 0;
-			});
-		}
-	}
-	/*parallel_for_each(A.extent, [=](index<2> idx) restrict(amp)
+	double* T_irr = new double[N_grids];
+	parallel_for(0, N_grids - 1, [=](int i) 
 	{
-		A(0, idx[1]) = A(0, idx[1]) / A(0, 0);
-		
-		for (int i = 0; i < idx[0]; i++)
-		{
-			if (A(i, i) != 0)
-				A(idx[0], idx[1]) -= A(i, idx[1])*A(idx[0], i) / A(i, i);
-		}
-	});*/
+		double C = nu * (1 - epsilon)*((H[i + 1] - H[i]) / (R[i + 1] - R[i]) - H[i] / R[i]);
+		T_irr[i] = pow(C * L / (4 * PI * a * R[i]), 0.25);
+	});
+	return T_irr;
+}
 
-	for (int i = 0; i < length; i++)
+double* IrradiationTemperaturePower_4(int N_grids, double nu, double epsilon, double L, double* R, double* H)
+{
+	const double a = 5.67051e-5;                                         // (stefan boltzmann constant) erg cm-2 K-4 s-1
+	const double PI = 3.14159265358979323846;
+
+	double* T_irr = new double[N_grids];
+	parallel_for(0, N_grids - 1, [=](int i)
 	{
-		for (int j = 0; j < length; j++)
-		{
-			cout << A(i, j) << "\t";
-		}
-		cout << "\n";
-	}
+		double C = nu * (1 - epsilon)*((H[i + 1] - H[i]) / (R[i + 1] - R[i]) - H[i] / R[i]);
+		T_irr[i] = C * L / (4 * PI * a * R[i]);
+	});
+	return T_irr;
+}
+
+double eVtoHz(double eV)
+{
+	return 2.417990504024e+14 * eV; // not sure...
 }
