@@ -16,7 +16,7 @@ double NormalizationGaussian(double Mu, double Sigma, double R_isco, double R_ou
 void WriteGraphData(double* X, double* Y, int length, string filename, bool append);
 double eVtoHz(double eV);
 void ExtractSpectrum(double* T, double* X, double delta_X, int N_grids, double minEnergyEV, double maxEnergyEV, double resolutionEV, bool append);
-double* IrradiationTemperature(int N_grids, double nu, double epsilon, double L, double* R, double* H);
+void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilon, double L, double* R, double* H);
 double* IrradiationTemperaturePower_4(int N_grids, double nu, double epsilon, double L, double* R, double* H);
 
 int main()
@@ -162,12 +162,27 @@ int main()
 
 	L_instant = (vM_dot[0] * G * M_compact) / (2 * R_isco);		// Luminosity in ergs/s
 
-	vT_irr = IrradiationTemperature(N_grids, 1, 0.5, L_instant, vR, vH);
+	IrradiationTemperature(vT_irr, N_grids, 0.1, 0.5, L_instant, vR, vH);
 
 	parallel_for(0, N_grids, [=](int i)
 	{
 		vT_sur[i] = pow(pow(vT_irr[i], 4) + pow(vT_eff[i], 4), 0.25);
 	});
+
+	/*
+	* DANGER!!!!!
+	*/
+	parallel_for(0, N_grids - 2, [=](int i)
+	{
+		vT_c[i] = pow(3 * OpticalThickness(vE[i]) * (pow(vT_eff[i], 4) + pow(vT_irr[i], 4)) / 4 , 0.25);
+		vH[i] = sqrt((vT_c[i] * k * pow(vR[i], 3)) / (mu_p * m_p * G * M_compact));
+		vV[i] = alpha * sqrt((vT_c[i] * k) / (mu_p * m_p)) * vH[i];
+	});
+	/*
+	*
+	*
+	*/
+	L_instant = (vM_dot[0] * G * M_compact) / (2 * R_isco);		// Luminosity in ergs/s
 
 	ExtractSpectrum(vT_eff, vX, delta_X, N_grids, 1, 15000, 1, false);
 
@@ -250,28 +265,52 @@ int main()
 		});
 		//*************************************************************************************************
 		//*************************************************************************************************
-
-		// Obtain new M_dot values ************************************************************************
-		//*************************************************************************************************
+		parallel_for(0, N_grids, [=](int i)
+		{
+			vE[i] = vS[i] / vX[i];
+		});
 		parallel_for(0, N_grids - 2, [=](int i)
 		{
 			vM_dot[i] = 3. * PI * (vV[i + 1] * vS[i + 1] - vV[i] * vS[i]) / delta_X;
+			vT_eff[i] = pow(3 * G * M_compact * abs(vM_dot[i]) / (8 * PI * a * pow(vX[i], 6)) * (1 - sqrt(X_isco / pow(vX[i], 2))), 0.25);
+			vT_c[i] = pow(3 * OpticalThickness(vE[i]) * pow(vT_eff[i], 4) / 4, 0.25);
+			vH[i] = sqrt((vT_c[i] * k * pow(vR[i], 3)) / (mu_p * m_p * G * M_compact));
 		});
-		//*************************************************************************************************
-		//*************************************************************************************************
 
+		L_instant = (vM_dot[0] * G * M_compact) / (2 * R_isco);		// Luminosity in ergs/s
+
+		IrradiationTemperature(vT_irr, N_grids, 0.1, 0.5, L_instant, vR, vH);
+
+		parallel_for(0, N_grids, [=](int i)
+		{
+			vT_sur[i] = pow(pow(vT_irr[i], 4) + pow(vT_eff[i], 4), 0.25);
+		});
+
+		/*
+		* DANGER!!!!!
+		*/
+		parallel_for(0, N_grids - 2, [=](int i)
+		{
+			vT_c[i] = pow(3 * OpticalThickness(vE[i]) * (pow(vT_sur[i], 4)) / 4, 0.25);
+			vH[i] = sqrt((vT_c[i] * k * pow(vR[i], 3)) / (mu_p * m_p * G * M_compact));
+			vV[i] = alpha * sqrt((vT_c[i] * k) / (mu_p * m_p)) * vH[i];
+		});
+		/*
+		*
+		*
+		*/
 
 		T += dT; // Increase time
 
-		L_instant = (vM_dot[0] * G * M_compact) / (2 * R_isco);		// Luminosity in ergs/s
-		file << T << "\t" << L_instant << "\n";						// Write luminosity to file
+		if(L_instant > 0)
+			file << T << "\t" << L_instant << "\n";						// Write luminosity to file
 
 		// Take samples ***********************************************************************************
 		//*************************************************************************************************
 		if (T >= vT_sample[j])
 		{
 			j++;
-
+/*
 			// Obtain E values for central temperature*********************************************************
 			//*************************************************************************************************
 			parallel_for(0, N_grids, [=](int i)
@@ -305,13 +344,13 @@ int main()
 				vH[i] = sqrt((vT_c[i] * k * pow(vR[i], 3)) / (mu_p * m_p * G * M_compact));
 			});
 
-			vT_irr = IrradiationTemperature(N_grids, 1, 0.5, L_instant, vR, vH);
+			vT_irr = IrradiationTemperature(N_grids, 0.1, 0.5, L_instant, vR, vH);
 
 			parallel_for(0, N_grids, [=](int i)
 			{
 				vT_sur[i] = pow(pow(vT_irr[i], 4) + pow(vT_eff[i], 4), 0.25);
 			});
-
+			*/
 			ExtractSpectrum(vT_eff, vX, delta_X, N_grids, 1, 15000, 1, true);
 
 			WriteGraphData(vR, vE, N_grids, "EvsR.txt", true);
@@ -322,6 +361,7 @@ int main()
 			WriteGraphData(vR, vT_irr, N_grids - 1, "TirrvsR.txt", true);
 			WriteGraphData(vR, vT_sur, N_grids - 1, "TsurvsR.txt", true);
 			WriteGraphData(vR, vH, N_grids, "HvsR.txt", true);
+
 			end = std::chrono::high_resolution_clock::now();
 			elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 			cout << "Current time step is " << dT << " s.\n";
@@ -396,21 +436,19 @@ void ExtractSpectrum(double* T, double* X, double delta_X, int N_grids, double m
 	WriteGraphData(eV, I_bb, numberofchannels, "powerspectrum.txt", append);
 }
 // Point source assumed
-double* IrradiationTemperature(int N_grids, double nu, double epsilon, double L, double* R, double* H)
+void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilon, double L, double* R, double* H)
 {
 	const double a = 5.67051e-5;                                         // (stefan boltzmann constant) erg cm-2 K-4 s-1
 	const double PI = 3.14159265358979323846;
 
-	double* T_irr = new double[N_grids];
 	parallel_for(0, N_grids - 1, [=](int i) 
 	{
-		double C = nu * (1 - epsilon)*((H[i + 1] - H[i]) / (R[i + 1] - R[i]) - H[i] / R[i]);
-		if (C > 0)
-			T_irr[i] = pow(C * L / (4 * PI * a * R[i]), 0.25);
+		double C = nu * (1 - epsilon)*((H[i + 1] - H[i]) / (R[i + 1] - R[i]) - H[i + 1] / R[i + 1]);
+		if (C > 0 && L > 0)
+			T_irr[i + 1] = pow(C * L / (4 * PI * a * R[i + 1]), 0.25);
 		else
-			T_irr[i] = 0;
+			T_irr[i + 1] = 0;
 	});
-	return T_irr;
 }
 
 double* IrradiationTemperaturePower_4(int N_grids, double nu, double epsilon, double L, double* R, double* H)
