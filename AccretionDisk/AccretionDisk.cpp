@@ -245,7 +245,6 @@ int main()
 
 		// Iterate in radial coordinate ******************************************************************
 		//************************************************************************************************
-		//Concurrency::extent<1> ext2(N_grids - 2);
 		parallel_for(0, N_grids - 2, [=](int i)
 		{
 			
@@ -291,9 +290,9 @@ int main()
 		*/
 		parallel_for(0, N_grids - 2, [=](int i)
 		{
-			vT_c[i] = pow(3 * OpticalThickness(vE[i]) * (pow(vT_sur[i], 4)) / 4, 0.25);
-			vH[i] = sqrt((vT_c[i] * k * pow(vR[i], 3)) / (mu_p * m_p * G * M_compact));
-			vV[i] = alpha * sqrt((vT_c[i] * k) / (mu_p * m_p)) * vH[i];
+			vT_c[i + 1] = pow(3 * OpticalThickness(vE[i + 1]) * pow(vT_eff[i + 1], 4) / 8  + (pow(vT_irr[i + 1], 4)), 0.25);
+			vH[i + 1] = sqrt((vT_c[i + 1] * k * pow(vR[i + 1], 3)) / (mu_p * m_p * G * M_compact));
+			vV[i + 1] = alpha * sqrt((vT_c[i + 1] * k) / (mu_p * m_p)) * vH[i + 1];
 		});
 		/*
 		*
