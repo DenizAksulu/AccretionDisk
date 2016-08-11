@@ -162,11 +162,11 @@ int main()
 
 	L_instant = (vM_dot[0] * G * M_compact) / (2 * R_isco);		// Luminosity in ergs/s
 
-	IrradiationTemperature(vT_irr, N_grids, 0.1, 0.5, L_instant, vR, vH);
+	IrradiationTemperature(vT_irr, N_grids, 2, 0.5, L_instant, vR, vH);
 
-	parallel_for(0, N_grids, [=](int i)
+	parallel_for(0, N_grids - 2, [=](int i)
 	{
-		vT_sur[i] = pow(pow(vT_irr[i], 4) + pow(vT_eff[i], 4), 0.25);
+		vT_sur[i + 1] = pow(pow(vT_irr[i + 1], 4) + pow(vT_eff[i + 1], 4), 0.25);
 	});
 
 	/*
@@ -174,26 +174,27 @@ int main()
 	*/
 	parallel_for(0, N_grids - 2, [=](int i)
 	{
-		vT_c[i] = pow(3 * OpticalThickness(vE[i]) * (pow(vT_eff[i], 4) + pow(vT_irr[i], 4)) / 4 , 0.25);
-		vH[i] = sqrt((vT_c[i] * k * pow(vR[i], 3)) / (mu_p * m_p * G * M_compact));
-		vV[i] = alpha * sqrt((vT_c[i] * k) / (mu_p * m_p)) * vH[i];
+		vT_c[i + 1] = pow(3 * OpticalThickness(vE[i + 1]) * pow(vT_eff[i + 1], 4) / 8 + (pow(vT_irr[i + 1], 4)), 0.25);
+		vH[i + 1] = sqrt((vT_c[i + 1] * k * pow(vR[i + 1], 3)) / (mu_p * m_p * G * M_compact));
+		vV[i + 1] = alpha * sqrt((vT_c[i + 1] * k) / (mu_p * m_p)) * vH[i + 1];
 	});
 	/*
 	*
 	*
 	*/
+
 	L_instant = (vM_dot[0] * G * M_compact) / (2 * R_isco);		// Luminosity in ergs/s
 
-	ExtractSpectrum(vT_eff, vX, delta_X, N_grids, 1, 15000, 1, false);
+	ExtractSpectrum(vT_eff, vX, delta_X, N_grids - 2, 1, 15000, 1, false);
 
 	WriteGraphData(vR, vT_irr, N_grids - 1, "TirrvsR.txt", false);
 	WriteGraphData(vR, vE, N_grids, "EvsR.txt", false);
 	WriteGraphData(vR, vV, N_grids, "VvsR.txt", false);
 	WriteGraphData(vR, vM_dot, N_grids-1, "MdotvsR.txt", false);
-	WriteGraphData(vR, vT_eff, N_grids-1, "TeffvsR.txt", false);
-	WriteGraphData(vR, vT_c, N_grids - 1, "TcvsR.txt", false);
-	WriteGraphData(vR, vH, N_grids, "HvsR.txt", false);
-	WriteGraphData(vR, vT_sur, N_grids - 1, "TsurvsR.txt", false);
+	WriteGraphData(vR, vT_eff, N_grids-2, "TeffvsR.txt", false);
+	WriteGraphData(vR, vT_c, N_grids - 2, "TcvsR.txt", false);
+	WriteGraphData(vR, vH, N_grids - 2, "HvsR.txt", false);
+	WriteGraphData(vR, vT_sur, N_grids - 2, "TsurvsR.txt", false);
 
 
 
@@ -217,10 +218,14 @@ int main()
 	}
 
 	int j = 0;
+	int l = 0;
 	start = chrono::high_resolution_clock::now();
 
 	ofstream file;
 	file.open("lightcurve.txt", ios::out);
+	if (L_instant > 0)
+		file << T << "\t" << L_instant << "\n";						// Write luminosity to file
+	file.close();
 	while (T < T_max)
 	{
 		// Determine outer boundary condition*************************************************************
@@ -271,18 +276,18 @@ int main()
 		parallel_for(0, N_grids - 2, [=](int i)
 		{
 			vM_dot[i] = 3. * PI * (vV[i + 1] * vS[i + 1] - vV[i] * vS[i]) / delta_X;
-			vT_eff[i] = pow(3 * G * M_compact * abs(vM_dot[i]) / (8 * PI * a * pow(vX[i], 6)) * (1 - sqrt(X_isco / pow(vX[i], 2))), 0.25);
-			vT_c[i] = pow(3 * OpticalThickness(vE[i]) * pow(vT_eff[i], 4) / 4, 0.25);
-			vH[i] = sqrt((vT_c[i] * k * pow(vR[i], 3)) / (mu_p * m_p * G * M_compact));
+			vT_eff[i + 1] = pow(3 * G * M_compact * abs(vM_dot[i + 1]) / (8 * PI * a * pow(vX[i + 1], 6)) * (1 - sqrt(X_isco / pow(vX[i + 1], 2))), 0.25);
+			vT_c[i + 1] = pow(3 * OpticalThickness(vE[i + 1]) * pow(vT_eff[i + 1], 4) / 4, 0.25);
+			vH[i + 1] = sqrt((vT_c[i + 1] * k * pow(vR[i + 1], 3)) / (mu_p * m_p * G * M_compact));
 		});
 
 		L_instant = (vM_dot[0] * G * M_compact) / (2 * R_isco);		// Luminosity in ergs/s
 
-		IrradiationTemperature(vT_irr, N_grids, 0.1, 0.5, L_instant, vR, vH);
+		IrradiationTemperature(vT_irr, N_grids, 2, 0.5, L_instant, vR, vH);
 
-		parallel_for(0, N_grids, [=](int i)
+		parallel_for(0, N_grids - 2, [=](int i)
 		{
-			vT_sur[i] = pow(pow(vT_irr[i], 4) + pow(vT_eff[i], 4), 0.25);
+			vT_sur[i + 1] = pow(pow(vT_irr[i + 1], 4) + pow(vT_eff[i + 1], 4), 0.25);
 		});
 
 		/*
@@ -301,9 +306,14 @@ int main()
 
 		T += dT; // Increase time
 
-		if(L_instant > 0)
-			file << T << "\t" << L_instant << "\n";						// Write luminosity to file
-
+		if (T >= (l + 1) * 1800)
+		{
+			l++;
+			file.open("lightcurve.txt", ios::app);
+			if (L_instant > 0)
+				file << T << "\t" << L_instant << "\n";						// Write luminosity to file
+			file.close();
+		}
 		// Take samples ***********************************************************************************
 		//*************************************************************************************************
 		if (T >= vT_sample[j])
@@ -350,16 +360,16 @@ int main()
 				vT_sur[i] = pow(pow(vT_irr[i], 4) + pow(vT_eff[i], 4), 0.25);
 			});
 			*/
-			ExtractSpectrum(vT_eff, vX, delta_X, N_grids, 1, 15000, 1, true);
+			ExtractSpectrum(vT_eff, vX, delta_X, N_grids - 2, 1, 15000, 1, true);
 
 			WriteGraphData(vR, vE, N_grids, "EvsR.txt", true);
 			WriteGraphData(vR, vV, N_grids, "VvsR.txt", true);
 			WriteGraphData(vR, vM_dot, N_grids- 1, "MdotvsR.txt", true);
-			WriteGraphData(vR, vT_eff, N_grids - 1, "TeffvsR.txt", true);
-			WriteGraphData(vR, vT_c, N_grids - 1, "TcvsR.txt", true);
-			WriteGraphData(vR, vT_irr, N_grids - 1, "TirrvsR.txt", true);
-			WriteGraphData(vR, vT_sur, N_grids - 1, "TsurvsR.txt", true);
-			WriteGraphData(vR, vH, N_grids, "HvsR.txt", true);
+			WriteGraphData(vR, vT_eff, N_grids - 2, "TeffvsR.txt", true);
+			WriteGraphData(vR, vT_c, N_grids - 2, "TcvsR.txt", true);
+			WriteGraphData(vR, vT_irr, N_grids - 2, "TirrvsR.txt", true);
+			WriteGraphData(vR, vT_sur, N_grids - 2, "TsurvsR.txt", true);
+			WriteGraphData(vR, vH, N_grids - 2, "HvsR.txt", true);
 
 			end = std::chrono::high_resolution_clock::now();
 			elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
@@ -369,7 +379,6 @@ int main()
 		//*************************************************************************************************
 		//*************************************************************************************************
 	}
-	file.close();
 	cout << "All done!";
 	cin.get();
 	cin.get();
@@ -422,13 +431,13 @@ void ExtractSpectrum(double* T, double* X, double delta_X, int N_grids, double m
 		I_bb[i] = 0;
 		eV[i] = minEnergyEV + resolutionEV * i;
 	});
-	parallel_for(0, N_grids, [=](int i)
+	parallel_for(0, N_grids - 2, [=](int i)
 	{
 		parallel_for(0, numberofchannels, [=](int j)
 		{
-			if(T[i] != 0)
+			if(T[i + 1] != 0)
 				I_bb[j] += (2 * h * pow(eVtoHz(eV[j]), 3) / pow(c, 2)) / (exp((h * eVtoHz(eV[j])) /
-					(k * T[i])) - 1)
+					(k * T[i + 1])) - 1)
 					* 4 * PI * pow(X[i], 3) * delta_X; // infinitesimal area
 		});
 	});
@@ -442,11 +451,19 @@ void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilo
 
 	parallel_for(0, N_grids - 1, [=](int i) 
 	{
-		double C = nu * (1 - epsilon)*((H[i + 1] - H[i]) / (R[i + 1] - R[i]) - H[i + 1] / R[i + 1]);
-		if (C > 0 && L > 0)
-			T_irr[i + 1] = pow(C * L / (4 * PI * a * R[i + 1]), 0.25);
-		else
-			T_irr[i + 1] = 0;
+		parallel_for(0, i + 1, [=](int j)
+		{
+			if (H[i + 1] < H[j])
+				T_irr[i + 1] = 0;
+			else
+			{
+				double C = nu * (1 - epsilon)*((H[i + 1] - H[i]) / (R[i + 1] - R[i]) - H[i + 1] / R[i + 1]);
+				if (C > 0 && L > 0)
+					T_irr[i + 1] = pow(C * L / (4 * PI * a * R[i + 1]), 0.25);
+				else
+					T_irr[i + 1] = 0;
+			}
+		});
 	});
 }
 
