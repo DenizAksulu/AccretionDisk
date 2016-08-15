@@ -8,8 +8,48 @@
 #include <chrono>
 
 using namespace std;
-using namespace ::Concurrency;
+using namespace :: Concurrency;
 //using namespace ::Concurrency::fast_math;
+
+// CONSTANTS*******************************************************************
+static const double day = 86400e0;                                          // (day) s
+static const double month = 2629743.83e0;                                   // (month) s
+static const double year = 31556926e0;                                      // (year) s
+static const double M_solar = 1.9891e33;                                    // (solar mass) g
+static const double AU = 1.496e13;                                          // (astronomical unit) cm
+static const double ly = 9.463e17;                                          // (light year) cm
+static const double pc = 3.086e18;                                          // (parsec)cm
+static const double c = 2.99792458e10;                                      // (speed of light) cm / s
+static const double h = 6.6260755e-27;                                      // (planck's constant) erg s
+static const double hbar = 1.05457266e-27;                                  // (reduced planck's constant) erg s
+static const double G = 6.67259e-8;                                         // (gravitational constant) cm3 g-1 s-2
+static const double e = 4.8032068e-10;                                      // (electron charge) esu
+static const double m_e = 9.1093897e-28;                                    // (mass of electron) g
+static const double m_p = 1.6726231e-24;                                    // (mass of proton) g
+static const double m_n = 1.6749286e-24;                                    // (mass of neutron) g
+static const double m_H = 1.6733e-24;                                       // (mass of hydrogen) g
+static const double k = 1.380658e-16;                                       // (boltzmann's constant) erg K-1
+static const double eV = 1.6021772e-12;                                     // (electron volt) erg
+static const double a = 5.67051e-5;                                         // (stefan boltzmann constant) erg cm-2 K-4 s-1
+static const double thompson = 6.6524e-25;                                  // (thompson cross-section for electron) cm-2
+static const double PI = 3.14159265358979323846;
+//******************************************************************************************************************
+
+// VARIABLES
+static double M_compact;								// Mass of the compact object
+static double M_disk;									// Mass of the disk
+static double M_dot_boundary;									// Accretion rate
+static double R_isco, R_outer, X_isco, X_outer;		// Inner and outer radius
+static int N_grids;									// Number of grids
+static int N_sample;									// Number of samples
+static double delta_X;									// Step size
+static double mu_p = 0.6;								// proton ratio
+static double T_max;
+static double T = 0;
+static double L_instant = 0;
+static double L_previous = 0;
+static double alpha_hot = 0.1;
+static double alpha_cold = 0.033;
 
 double OpticalThickness(double SurfaceDensity);
 double NormalizationGaussian(double Mu, double Sigma, double R_isco, double R_outer, double M_disk);
@@ -18,46 +58,12 @@ double eVtoHz(double eV);
 void ExtractSpectrum(double* T, double* X, double delta_X, int N_grids, double minEnergyEV, double maxEnergyEV, double resolutionEV, bool append);
 void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilon, double L, double* R, double* H);
 double* IrradiationTemperaturePower_4(int N_grids, double nu, double epsilon, double L, double* R, double* H);
+double alpha(double T);									// alpha parameter for disk
+double VISC_C(double T);
 
 int main()
 {
-	// CONSTANTS*******************************************************************
-	const double day = 86400e0;                                          // (day) s
-	const double month = 2629743.83e0;                                   // (month) s
-	const double year = 31556926e0;                                      // (year) s
-	const double M_solar = 1.9891e33;                                    // (solar mass) g
-	const double AU = 1.496e13;                                          // (astronomical unit) cm
-	const double ly = 9.463e17;                                          // (light year) cm
-	const double pc = 3.086e18;                                          // (parsec)cm
-	const double c = 2.99792458e10;                                      // (speed of light) cm / s
-	const double h = 6.6260755e-27;                                      // (planck's constant) erg s
-	const double hbar = 1.05457266e-27;                                  // (reduced planck's constant) erg s
-	const double G = 6.67259e-8;                                         // (gravitational constant) cm3 g-1 s-2
-	const double e = 4.8032068e-10;                                      // (electron charge) esu
-	const double m_e = 9.1093897e-28;                                    // (mass of electron) g
-	const double m_p = 1.6726231e-24;                                    // (mass of proton) g
-	const double m_n = 1.6749286e-24;                                    // (mass of neutron) g
-	const double m_H = 1.6733e-24;                                       // (mass of hydrogen) g
-	const double k = 1.380658e-16;                                       // (boltzmann's constant) erg K-1
-	const double eV = 1.6021772e-12;                                     // (electron volt) erg
-	const double a = 5.67051e-5;                                         // (stefan boltzmann constant) erg cm-2 K-4 s-1
-	const double thompson = 6.6524e-25;                                  // (thompson cross-section for electron) cm-2
-	const double PI = 3.14159265358979323846;
-	//******************************************************************************************************************
 
-	// VARIABLES
-	double M_compact;								// Mass of the compact object
-	double M_disk;									// Mass of the disk
-	double M_dot_boundary;									// Accretion rate
-	double R_isco, R_outer, X_isco, X_outer;		// Inner and outer radius
-	int N_grids;									// Number of grids
-	int N_sample;									// Number of samples
-	double delta_X;									// Step size
-	double alpha;									// alpha parameter for disk
-	double mu_p = 0.6;								// proton ratio
-	double T_max;
-	double T = 0;
-	double L_instant = 0;
 
 	cout << "Accretion disk simulation with parallel CPU computing.\n\n";
 	/*accelerator acc;
@@ -75,8 +81,6 @@ int main()
 	cout << "Please enter the accretion rate. (M_solar s-1)\n";
 	cin >> n;
 	M_dot_boundary = n * M_solar;
-	cout << "Please enter the alpha parameter.\n";
-	cin >> alpha;
 
 	// Calculate some initial values
 	R_isco = 6 * G * M_compact / pow(c, 2);
@@ -122,10 +126,7 @@ int main()
 	//********************************************************************************************************************************************************
 	auto start = chrono::high_resolution_clock::now();
 
-	double VIS_C = pow(
-		(27. / 32.) * (pow(alpha, 4) * pow(k, 4) * thompson)
-		/ (pow(mu_p, 4) * pow(m_p, 5) * a * G * M_compact)
-		, (1. / 3.));
+	
 	double Mu = (R_outer - R_isco) / 2;
 	double Sigma = (R_outer - R_isco) / 10;
 
@@ -142,7 +143,7 @@ int main()
 		vR[i] = vX[i]*vX[i];
 		vE[i] = E_0 * exp(-1 * (pow((vR[i] - Mu), 2.)) / (2. * pow(Sigma, 2.)));
 		vS[i] = vX[i]*vE[i];
-		vV[i] = VIS_C * pow(vX[i], (4. / 3.)) * pow(vS[i], (2. / 3.));
+		vV[i] = VISC_C(0) * pow(vX[i], (4. / 3.)) * pow(vS[i], (2. / 3.));
 		vJ_total += 4 * PI * sqrt(G * M_compact) * vX[i] * vS[i] * delta_X;
 	});
 	parallel_for(0, N_grids - 2, [=](int i)
@@ -176,7 +177,7 @@ int main()
 	{
 		vT_c[i + 1] = pow(3 * OpticalThickness(vE[i + 1]) * pow(vT_eff[i + 1], 4) / 8 + (pow(vT_irr[i + 1], 4)), 0.25);
 		vH[i + 1] = sqrt((vT_c[i + 1] * k * pow(vR[i + 1], 3)) / (mu_p * m_p * G * M_compact));
-		vV[i + 1] = alpha * sqrt((vT_c[i + 1] * k) / (mu_p * m_p)) * vH[i + 1];
+		vV[i + 1] = alpha(vT_c[i]) * sqrt((vT_c[i + 1] * k) / (mu_p * m_p)) * vH[i + 1];
 	});
 	/*
 	*
@@ -226,12 +227,13 @@ int main()
 	if (L_instant > 0)
 		file << T << "\t" << L_instant << "\n";						// Write luminosity to file
 	file.close();
+	L_previous = 0.1;
 	while (T < T_max)
 	{
 		// Determine outer boundary condition*************************************************************
 		//************************************************************************************************
 		vS[N_grids - 1] = pow(((vM_dot[N_grids - 2] * delta_X / (3. * PI) + vS[N_grids - 2] * vV[N_grids - 2]) 
-			/ (VIS_C * pow(vX[N_grids - 1], (4. / 3.)))), 
+			/ (VISC_C(vT_c[N_grids - 1]) * pow(vX[N_grids - 1], (4. / 3.)))),
 			(3. / 5.));
 		//************************************************************************************************
 		//************************************************************************************************
@@ -255,7 +257,7 @@ int main()
 			
 			vS_new[i + 1] = vS[i + 1] + 0.75 * dT / pow((vX[i + 1] * delta_X), 2) *
 				(vV[i + 2] * vS[i + 2] + vV[i] * vS[i] - 2. * vV[i + 1] * vS[i + 1]);
-			vV_new[i + 1] = VIS_C * pow(vX[i + 1], (4./3.)) * pow(vS_new[i + 1], (2. / 3.));
+			vV_new[i + 1] = VISC_C(vT_c[i + 1]) * pow(vX[i + 1], (4./3.)) * pow(vS_new[i + 1], (2. / 3.));
 		});
 		//*************************************************************************************************
 		//*************************************************************************************************
@@ -283,6 +285,9 @@ int main()
 
 		L_instant = (vM_dot[0] * G * M_compact) / (2 * R_isco);		// Luminosity in ergs/s
 
+		
+
+
 		IrradiationTemperature(vT_irr, N_grids, 2, 0.5, L_instant, vR, vH);
 
 		parallel_for(0, N_grids - 2, [=](int i)
@@ -297,7 +302,7 @@ int main()
 		{
 			vT_c[i + 1] = pow(3 * OpticalThickness(vE[i + 1]) * pow(vT_eff[i + 1], 4) / 8  + (pow(vT_irr[i + 1], 4)), 0.25);
 			vH[i + 1] = sqrt((vT_c[i + 1] * k * pow(vR[i + 1], 3)) / (mu_p * m_p * G * M_compact));
-			vV[i + 1] = alpha * sqrt((vT_c[i + 1] * k) / (mu_p * m_p)) * vH[i + 1];
+			vV[i + 1] = alpha(vT_c[i]) * sqrt((vT_c[i + 1] * k) / (mu_p * m_p)) * vH[i + 1];
 		});
 		/*
 		*
@@ -306,8 +311,17 @@ int main()
 
 		T += dT; // Increase time
 
-		if (T >= (l + 1) * 1800)
+		if (T >= (l + 1) * 600)
 		{
+			if (L_instant < L_previous)
+			{
+				cout << "Maximum luminosity reached -> L = " << L_instant << " erg/s at time T = " << T << " s.\n" << elapsed.count() << " ms have elapsed.\n";
+				L_previous = 0;
+			}
+			else if (L_previous != 0)
+			{
+				L_previous = L_instant;
+			}
 			l++;
 			file.open("lightcurve.txt", ios::app);
 			if (L_instant > 0)
@@ -411,18 +425,12 @@ void WriteGraphData(double* X, double* Y, int length, string filename, bool appe
 
 double OpticalThickness(double SurfaceDensity)
 {
-	const double thompson = 6.6524e-25;                                  // (thompson cross-section for electron) cm-2
-	const double m_p = 1.6726231e-24;                                    // (mass of proton) g
 	double Opacity = thompson / m_p;
 	return SurfaceDensity * Opacity;
 }
 
 void ExtractSpectrum(double* T, double* X, double delta_X, int N_grids, double minEnergyEV, double maxEnergyEV, double resolutionEV, bool append)
 {
-	const double k = 1.380658e-16;                                       // (boltzmann's constant) erg K-1
-	const double c = 2.99792458e10;                                      // (speed of light) cm / s
-	const double h = 6.6260755e-27;                                      // (planck's constant) erg s
-	const double PI = 3.14159265358979323846;
 	int numberofchannels = (maxEnergyEV - minEnergyEV) / resolutionEV;
 	double* I_bb = new double[numberofchannels];
 	double* eV = new double[numberofchannels];
@@ -446,8 +454,6 @@ void ExtractSpectrum(double* T, double* X, double delta_X, int N_grids, double m
 // Point source assumed
 void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilon, double L, double* R, double* H)
 {
-	const double a = 5.67051e-5;                                         // (stefan boltzmann constant) erg cm-2 K-4 s-1
-	const double PI = 3.14159265358979323846;
 
 	parallel_for(0, N_grids - 1, [=](int i) 
 	{
@@ -469,8 +475,6 @@ void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilo
 
 double* IrradiationTemperaturePower_4(int N_grids, double nu, double epsilon, double L, double* R, double* H)
 {
-	const double a = 5.67051e-5;                                         // (stefan boltzmann constant) erg cm-2 K-4 s-1
-	const double PI = 3.14159265358979323846;
 
 	double* T_irr = new double[N_grids];
 	parallel_for(0, N_grids - 1, [=](int i)
@@ -484,4 +488,20 @@ double* IrradiationTemperaturePower_4(int N_grids, double nu, double epsilon, do
 double eVtoHz(double eV)
 {
 	return 2.417990504024e+14 * eV; // not sure...
+}
+
+double alpha(double T)
+{
+	if (T > 11000)
+		return alpha_hot;
+	else return alpha_cold;
+}
+
+double VISC_C(double T)
+{
+	double VIS_C = pow(
+		(27. / 32.) * (pow(alpha(T), 4) * pow(k, 4) * thompson)
+		/ (pow(mu_p, 4) * pow(m_p, 5) * a * G * M_compact)
+		, (1. / 3.));
+	return VIS_C;
 }
