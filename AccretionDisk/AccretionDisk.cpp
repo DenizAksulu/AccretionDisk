@@ -45,11 +45,14 @@ static int N_sample;									// Number of samples
 static double delta_X;									// Step size
 static double mu_p = 0.6;								// proton ratio
 static double T_max;
+static double T_L = 99999999999;
+static double T_corona;
 static double T = 0;
 static double L_instant = 0;
 static double L_previous = 0;
-static double alpha_hot = 0.1;
-static double alpha_cold = 0.033;
+static double alpha_hot = 0.01;
+static double alpha_cold = 0.0033;
+static bool Corona = false;
 
 double OpticalThickness(double SurfaceDensity);
 double NormalizationGaussian(double Mu, double Sigma, double R_isco, double R_outer, double M_disk);
@@ -60,6 +63,7 @@ void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilo
 double* IrradiationTemperaturePower_4(int N_grids, double nu, double epsilon, double L, double* R, double* H);
 double alpha(double T);									// alpha parameter for disk
 double VISC_C(double T);
+double average(double numbers[], int size);
 
 int main()
 {
@@ -173,12 +177,12 @@ int main()
 	/*
 	* DANGER!!!!!
 	*/
-	parallel_for(0, N_grids - 2, [=](int i)
+	/*parallel_for(0, N_grids - 2, [=](int i)
 	{
 		vT_c[i + 1] = pow(3 * OpticalThickness(vE[i + 1]) * pow(vT_eff[i + 1], 4) / 8 + (pow(vT_irr[i + 1], 4)), 0.25);
 		vH[i + 1] = sqrt((vT_c[i + 1] * k * pow(vR[i + 1], 3)) / (mu_p * m_p * G * M_compact));
 		vV[i + 1] = alpha(vT_c[i]) * sqrt((vT_c[i + 1] * k) / (mu_p * m_p)) * vH[i + 1];
-	});
+	});*/
 	/*
 	*
 	*
@@ -206,6 +210,9 @@ int main()
 	//********************************************************************
 	//********************************************************************
 
+	cout << "Corona formation time after main outburst? (days)\n";
+	cin >> n; T_corona = n*day;
+
 	cout << "Please enter the evolution duration. (months)\n";
 	cin >> n; T_max = n*month;
 
@@ -216,6 +223,13 @@ int main()
 	for (int i = 1; i <= N_sample; i++)
 	{
 		vT_sample[i - 1] = exp(i*deltaT_sample);
+	}
+	int N_L_sample = 15000;
+	double* vLT_sample = new double[N_L_sample];
+	double deltaLT_sample = log(T_max) / (double)N_L_sample;
+	for (int i = 1; i <= N_L_sample; i++)
+	{
+		vLT_sample[i - 1] = exp(i*deltaLT_sample);
 	}
 
 	int j = 0;
@@ -286,47 +300,47 @@ int main()
 		L_instant = (vM_dot[0] * G * M_compact) / (2 * R_isco);		// Luminosity in ergs/s
 
 		
-
-
-		IrradiationTemperature(vT_irr, N_grids, 2, 0.5, L_instant, vR, vH);
-
-		parallel_for(0, N_grids - 2, [=](int i)
+		if (T > T_L + T_corona)
 		{
-			vT_sur[i + 1] = pow(pow(vT_irr[i + 1], 4) + pow(vT_eff[i + 1], 4), 0.25);
-		});
 
-		/*
-		* DANGER!!!!!
-		*/
-		parallel_for(0, N_grids - 2, [=](int i)
-		{
-			vT_c[i + 1] = pow(3 * OpticalThickness(vE[i + 1]) * pow(vT_eff[i + 1], 4) / 8  + (pow(vT_irr[i + 1], 4)), 0.25);
-			vH[i + 1] = sqrt((vT_c[i + 1] * k * pow(vR[i + 1], 3)) / (mu_p * m_p * G * M_compact));
-			vV[i + 1] = alpha(vT_c[i]) * sqrt((vT_c[i + 1] * k) / (mu_p * m_p)) * vH[i + 1];
-		});
-		/*
-		*
-		*
-		*/
+			IrradiationTemperature(vT_irr, N_grids, 2, 0.5, L_instant, vR, vH);
+
+			parallel_for(0, N_grids - 2, [=](int i)
+			{
+				vT_sur[i + 1] = pow(pow(vT_irr[i + 1], 4) + pow(vT_eff[i + 1], 4), 0.25);
+			});
+
+
+			parallel_for(0, N_grids - 2, [=](int i)
+			{
+				vT_c[i + 1] = pow(3 * OpticalThickness(vE[i + 1]) * pow(vT_eff[i + 1], 4) / 8 + (pow(vT_irr[i + 1], 4)), 0.25);
+				vH[i + 1] = sqrt((vT_c[i + 1] * k * pow(vR[i + 1], 3)) / (mu_p * m_p * G * M_compact));
+				vV[i + 1] = alpha(vT_c[i]) * sqrt((vT_c[i + 1] * k) / (mu_p * m_p)) * vH[i + 1];
+			});
+		}
 
 		T += dT; // Increase time
 
-		if (T >= (l + 1) * 600)
+		if (l < N_L_sample)
 		{
-			if (L_instant < L_previous)
+			if (T >= vLT_sample[l])
 			{
-				cout << "Maximum luminosity reached -> L = " << L_instant << " erg/s at time T = " << T << " s.\n" << elapsed.count() << " ms have elapsed.\n";
-				L_previous = 0;
+				if (L_instant < L_previous)
+				{
+					cout << "Maximum luminosity reached -> L = " << L_instant << " erg/s at time T = " << T << " s.\n" << elapsed.count() << " ms have elapsed.\n";
+					T_L = T;
+					L_previous = 0;
+				}
+				else if (L_previous != 0)
+				{
+					L_previous = L_instant;
+				}
+				l++;
+				file.open("lightcurve.txt", ios::app);
+				if (L_instant > 0)
+					file << T << "\t" << L_instant << "\n";						// Write luminosity to file
+				file.close();
 			}
-			else if (L_previous != 0)
-			{
-				L_previous = L_instant;
-			}
-			l++;
-			file.open("lightcurve.txt", ios::app);
-			if (L_instant > 0)
-				file << T << "\t" << L_instant << "\n";						// Write luminosity to file
-			file.close();
 		}
 		// Take samples ***********************************************************************************
 		//*************************************************************************************************
@@ -492,7 +506,7 @@ double eVtoHz(double eV)
 
 double alpha(double T)
 {
-	if (T > 11000)
+	if (T > 30000)
 		return alpha_hot;
 	else return alpha_cold;
 }
@@ -504,4 +518,14 @@ double VISC_C(double T)
 		/ (pow(mu_p, 4) * pow(m_p, 5) * a * G * M_compact)
 		, (1. / 3.));
 	return VIS_C;
+}
+
+double average(double numbers[], int size) {
+	double sum = 0;
+	parallel_for(0, size, [=, &sum](int i)
+	{
+		if(numbers[i] < 100)
+			sum += numbers[i];
+	});
+	return sum / (double)size;
 }
