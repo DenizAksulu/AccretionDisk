@@ -50,8 +50,8 @@ static double T_corona;
 static double T = 0;
 static double L_instant = 0;
 static double L_previous = 0;
-static double alpha_hot = 0.01;
-static double alpha_cold = 0.0033;
+static double alpha_hot = 0.1;
+static double alpha_cold = 0.033;
 static bool Corona = false;
 
 double OpticalThickness(double SurfaceDensity);
@@ -88,7 +88,7 @@ int main()
 
 	// Calculate some initial values
 	R_isco = 6 * G * M_compact / pow(c, 2);
-	R_outer = 1000 * R_isco;
+	R_outer = 3e11; // cm
 	X_isco = sqrt(R_isco);
 	X_outer = sqrt(R_outer);
 
@@ -131,8 +131,8 @@ int main()
 	auto start = chrono::high_resolution_clock::now();
 
 	
-	double Mu = (R_outer - R_isco) / 2;
-	double Sigma = (R_outer - R_isco) / 10;
+	double Mu = 5e10; // cm
+	double Sigma = 1e10;
 
 	double E_0 = NormalizationGaussian(Mu, Sigma, R_isco, R_outer, M_disk);
 
@@ -247,7 +247,7 @@ int main()
 		// Determine outer boundary condition*************************************************************
 		//************************************************************************************************
 		vS[N_grids - 1] = pow(((vM_dot[N_grids - 2] * delta_X / (3. * PI) + vS[N_grids - 2] * vV[N_grids - 2]) 
-			/ (VISC_C(vT_c[N_grids - 1]) * pow(vX[N_grids - 1], (4. / 3.)))),
+			/ (VISC_C(vT_eff[N_grids - 1]) * pow(vX[N_grids - 1], (4. / 3.)))),
 			(3. / 5.));
 		//************************************************************************************************
 		//************************************************************************************************
@@ -255,11 +255,11 @@ int main()
 		// Determine time step****************************************************************************
 		//************************************************************************************************
 
-		parallel_for(0, N_grids, [=] (int i)
+		parallel_for(1, N_grids, [=] (int i)
 		{
 			vdelta_T[i] = (1. / 6.) * (pow(delta_X * vX[i], 2) / vV[i]) / 0.75;
 		});
-		dT = *min_element(vdelta_T, vdelta_T + N_grids);
+		dT = *min_element(vdelta_T + 1, vdelta_T + N_grids);
 		
 		//************************************************************************************************
 		//************************************************************************************************
@@ -271,7 +271,7 @@ int main()
 			
 			vS_new[i + 1] = vS[i + 1] + 0.75 * dT / pow((vX[i + 1] * delta_X), 2) *
 				(vV[i + 2] * vS[i + 2] + vV[i] * vS[i] - 2. * vV[i + 1] * vS[i + 1]);
-			vV_new[i + 1] = VISC_C(vT_c[i + 1]) * pow(vX[i + 1], (4./3.)) * pow(vS_new[i + 1], (2. / 3.));
+			vV_new[i + 1] = VISC_C(vT_eff[i + 1]) * pow(vX[i + 1], (4./3.)) * pow(vS_new[i + 1], (2. / 3.));
 		});
 		//*************************************************************************************************
 		//*************************************************************************************************
@@ -300,10 +300,10 @@ int main()
 		L_instant = (vM_dot[0] * G * M_compact) / (2 * R_isco);		// Luminosity in ergs/s
 
 		
-		if (T > T_L + T_corona)
-		{
+		//if (T > T_L + T_corona)
+		//{
 
-			IrradiationTemperature(vT_irr, N_grids, 2, 0.5, L_instant, vR, vH);
+			IrradiationTemperature(vT_irr, N_grids, 0.1, 0.5, L_instant, vR, vH);
 
 			parallel_for(0, N_grids - 2, [=](int i)
 			{
@@ -315,9 +315,9 @@ int main()
 			{
 				vT_c[i + 1] = pow(3 * OpticalThickness(vE[i + 1]) * pow(vT_eff[i + 1], 4) / 8 + (pow(vT_irr[i + 1], 4)), 0.25);
 				vH[i + 1] = sqrt((vT_c[i + 1] * k * pow(vR[i + 1], 3)) / (mu_p * m_p * G * M_compact));
-				vV[i + 1] = alpha(vT_c[i]) * sqrt((vT_c[i + 1] * k) / (mu_p * m_p)) * vH[i + 1];
+				vV[i + 1] = alpha(vT_eff[i]) * sqrt((vT_c[i + 1] * k) / (mu_p * m_p)) * vH[i + 1];
 			});
-		}
+		//}
 
 		T += dT; // Increase time
 
@@ -468,22 +468,26 @@ void ExtractSpectrum(double* T, double* X, double delta_X, int N_grids, double m
 // Point source assumed
 void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilon, double L, double* R, double* H)
 {
-
-	parallel_for(0, N_grids - 1, [=](int i) 
+	bool shadow = false;
+	parallel_for(0, N_grids - 1, [=, &shadow](int i)
 	{
-		parallel_for(0, i + 1, [=](int j)
+		shadow = false;
+		parallel_for(0, i + 1, [=, &shadow](int j)
 		{
-			if (H[i + 1] < H[j])
-				T_irr[i + 1] = 0;
-			else
+			if (atan(H[i + 1] / R[i + 1]) < atan(H[j] / R[j]))
 			{
-				double C = nu * (1 - epsilon)*((H[i + 1] - H[i]) / (R[i + 1] - R[i]) - H[i + 1] / R[i + 1]);
-				if (C > 0 && L > 0)
-					T_irr[i + 1] = pow(C * L / (4 * PI * a * R[i + 1]), 0.25);
-				else
-					T_irr[i + 1] = 0;
+				T_irr[i + 1] = 0;
+				shadow = true;
 			}
 		});
+		if (!shadow)
+		{
+			double C = nu * (1 - epsilon)*((H[i + 1] - H[i]) / (R[i + 1] - R[i]) - H[i + 1] / R[i + 1]);
+			if (C > 0 && L > 0)
+				T_irr[i + 1] = pow(C * L / (4 * PI * a * R[i + 1]), 0.25);
+			else
+				T_irr[i + 1] = 0;
+		}
 	});
 }
 
@@ -506,7 +510,7 @@ double eVtoHz(double eV)
 
 double alpha(double T)
 {
-	if (T > 30000)
+	if (T > 10000)
 		return alpha_hot;
 	else return alpha_cold;
 }
