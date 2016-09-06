@@ -53,9 +53,7 @@ static double L_instant = 0;
 static double L_previous = 0;
 static double alpha_hot = 0.1;
 static double alpha_cold = 0.033;
-
 static bool Corona = false;
-
 static double opacity[19][70];
 static double logR[19] = { -8, -7.5, -7, -6.5, -6, -5.5, -5, -4.5, -4, -3.5, -3, -2.5, -2, -1.5, -1, -0.5, 0, 0.5, 1 };
 static double logT[70];
@@ -81,31 +79,6 @@ int main()
 	wcout << "Default accelerator is: " << acc.description << "\n";
 	wcout << "Accelerator memory is: " << acc.get_dedicated_memory() << " kB\n";
 	wcout << "Supports double precision operations: " << acc.get_supports_double_precision() << "\n\n";*/
-
-	// Read opacity table******************************************************************************************************************************
-	//********************************************************************************************************************************************************
-	ifstream opal("table#126.txt");
-	if (opal.is_open())
-	{
-		int row = 0, col = 0;
-		while (!opal.eof())
-		{
-			string line;
-			getline(opal, line);
-			stringstream ss(line);
-			ss >> logT[row];
-			col = 0;
-			while (ss >> opacity[col][row])
-			{
-				col++;
-			}
-			row++;
-		}
-	}
-	else
-	{
-		cout << "Opacity table not found!\n";
-	}
 
 	cout << "Please enter the mass of the compact object. (M_solar)\n";
 	double n; cin >> n;
@@ -151,13 +124,35 @@ int main()
 	double* vdelta_T = new double[N_grids];			// Surface mass density vector
 	double* vH = new double[N_grids];
 	double* vO = new double[N_grids];
-
 	double dT;
 	double vJ_total = 0;
 	vM_dot[N_grids - 1] = M_dot_boundary;
 	vM_dot[N_grids - 2] = M_dot_boundary;
 
-
+	// Read opacity table******************************************************************************************************************************
+	//********************************************************************************************************************************************************
+	ifstream opal("table#126.txt");
+	if (opal.is_open())
+	{
+		int row = 0, col = 0;
+		while (!opal.eof())
+		{
+			string line;
+			getline(opal, line);
+			stringstream ss(line);
+			ss >> logT[row];
+			col = 0;
+			while (ss >> opacity[col][row])
+			{
+				col++;
+			}
+			row++;
+		}
+	}
+	else
+	{
+		cout << "Opacity table not found!\n";
+	}
 	
 	// Create initial conditions******************************************************************************************************************************
 	//********************************************************************************************************************************************************
@@ -191,19 +186,15 @@ int main()
 			vT_eff[i] = pow(3 * G * M_compact * vM_dot[i] / (8 * PI * a * pow(vX[i], 6)) * (1 - sqrt(X_isco / pow(vX[i], 2))), 0.25);
 		else
 			vT_eff[i] = 0;
-
 		if (vM_dot[i] >= 0)
 			vT_c[i] = pow(3 * OpticalThickness(vE[i]) * pow(vT_eff[i], 4) / 4, 0.25);
 			
 		else
 			vT_c[i] = 0;
 		vH[i] = sqrt((vT_c[i] * k * pow(vR[i], 3)) / (mu_p * m_p * G * M_compact));
-
-
-
 		// Find Opacity value*****************************************************
 		//************************************************************************
-		/*int a = 0, b = 0;
+		int a = 0, b = 0;
 		for (int m = 0; m < 19; m++)
 		{
 			if (vH[i] > 0 && vH[i] < 1e13)
@@ -234,7 +225,7 @@ int main()
 				break;
 			}
 		}
-		vO[i] = pow(10, opacity[a][b]);*/
+		vO[i] = pow(10, opacity[a][b]);
 		//************************************************************************
 		//************************************************************************
 	});
@@ -323,7 +314,7 @@ int main()
 		// Determine outer boundary condition*************************************************************
 		//************************************************************************************************
 		vS[N_grids - 1] = pow(((vM_dot[N_grids - 2] * delta_X / (3. * PI) + vS[N_grids - 2] * vV[N_grids - 2]) 
-			/ (VISC_C(vT_c[N_grids - 1]) * pow(vX[N_grids - 1], (4. / 3.)))),
+			/ (VISC_C(vT_eff[N_grids - 1]) * pow(vX[N_grids - 1], (4. / 3.)))),
 			(3. / 5.));
 		//************************************************************************************************
 		//************************************************************************************************
@@ -347,7 +338,7 @@ int main()
 			
 			vS_new[i + 1] = vS[i + 1] + 0.75 * dT / pow((vX[i + 1] * delta_X), 2) *
 				(vV[i + 2] * vS[i + 2] + vV[i] * vS[i] - 2. * vV[i + 1] * vS[i + 1]);
-			vV_new[i + 1] = VISC_C(vT_c[i + 1]) * pow(vX[i + 1], (4./3.)) * pow(vS_new[i + 1], (2. / 3.));
+			vV_new[i + 1] = VISC_C(vT_eff[i + 1]) * pow(vX[i + 1], (4./3.)) * pow(vS_new[i + 1], (2. / 3.));
 		});
 		//*************************************************************************************************
 		//*************************************************************************************************
@@ -361,54 +352,54 @@ int main()
 		});
 		//*************************************************************************************************
 		//*************************************************************************************************
+		parallel_for(0, N_grids - 2, [=](int i)
+		{
+			vM_dot[i] = 3. * PI * (vV[i + 1] * vS[i + 1] - vV[i] * vS[i]) / delta_X;
+		});
 		parallel_for(0, N_grids, [=](int i)
 		{
 			vE[i] = vS[i] / vX[i];
 		});
-
-
 		parallel_for(0, N_grids - 2, [=](int i)
 		{
+			vT_eff[i + 1] = pow(3 * G * M_compact * abs(vM_dot[i + 1]) / (8 * PI * a * pow(vX[i + 1], 6)) * (1 - sqrt(X_isco / pow(vX[i + 1], 2))), 0.25);
+			vT_c[i + 1] = pow(3 * OpticalThickness(vE[i + 1]) * pow(vT_eff[i + 1], 4) / 4, 0.25);
+			vH[i + 1] = sqrt((vT_c[i + 1] * k * pow(vR[i + 1], 3)) / (mu_p * m_p * G * M_compact));
+
+
 			// Find Opacity value*****************************************************
 			//************************************************************************
-			/*int a = 0, b = 0;
+			int a = 0, b = 0;
 			for (int m = 0; m < 19; m++)
 			{
-				if (vH[i] > 0 && vH[i] < 1e13)
+				if (log10(vE[i + 1] / vH[i + 1] / pow(vT_eff[i + 1] * 1e-6, 3)) >= logR[18])
 				{
-					if (log10(vE[i] / vH[i] / pow(vT_eff[i] * 1e-6, 3)) >= logR[18])
-					{
-						a = 18;
-						break;
-					}
-					if (log10(vE[i] / vH[i] / pow(vT_eff[i] * 1e-6, 3)) < logR[m])
-					{
-						a = m;
-						break;
-					}
+					a = 18;
+					break;
+				}
+				if (log10(vE[i + 1] / vH[i + 1] / pow(vT_eff[i + 1] * 1e-6, 3)) < logR[m])
+				{
+					a = m;
+					break;
 				}
 			}
 
 			for (int n = 0; n < 70; n++)
 			{
-				if (log10(vT_c[i]) >= logT[69])
+				if (log10(vT_c[i + 1]) >= logT[69])
 				{
 					b = 69;
 					break;
 				}
-				if (log10(vT_c[i]) < logT[n])
+				if (log10(vT_c[i + 1]) < logT[n])
 				{
 					b = n;
 					break;
 				}
 			}
-			vO[i + 1] = pow(10, opacity[a][b]);*/
+			vO[i + 1] = pow(10, opacity[a][b]);
 			//************************************************************************
 			//************************************************************************
-			vM_dot[i + 1] = 3. * PI * (vV[i + 2] * vS[i + 2] - vV[i + 1] * vS[i + 1]) / delta_X;
-			vT_eff[i + 1] = pow(3 * G * M_compact * abs(vM_dot[i + 1]) / (8 * PI * a * pow(vX[i + 1], 6)) * (1 - sqrt(X_isco / pow(vX[i + 1], 2))), 0.25);
-			vT_c[i + 1] = pow(3 * vE[i + 1] * vO[i + 1] * pow(vT_eff[i + 1], 4) / 4, 0.25);
-			vH[i + 1] = sqrt((vT_c[i + 1] * k * pow(vR[i + 1], 3)) / (mu_p * m_p * G * M_compact));
 		});
 
 		L_instant = (vM_dot[0] * G * M_compact) / (2 * R_isco);		// Luminosity in ergs/s
@@ -421,7 +412,7 @@ int main()
 				cout << "Corona has formed at time T = " << T << " s.\n" << elapsed.count() << " ms have elapsed.\n";
 				message = false;
 			}
-			IrradiationTemperature(vT_irr, N_grids, 2, 0.5, L_instant, vR, vH);
+			IrradiationTemperature(vT_irr, N_grids, 10, 0.5, L_instant, vR, vH);
 
 			parallel_for(0, N_grids - 2, [=](int i)
 			{
@@ -431,9 +422,9 @@ int main()
 
 			parallel_for(0, N_grids - 2, [=](int i)
 			{
-				vT_c[i + 1] = pow(3 * vE[i + 1] * vO[i + 1] * pow(vT_eff[i + 1], 4) / 8 + (pow(vT_irr[i + 1], 4)), 0.25);
+				vT_c[i + 1] = pow(3 * vE[i + 1] * vO[i + 1] * (pow(vT_eff[i + 1], 4) + pow(vT_irr[i + 1], 4)) / 8, 0.25);
 				vH[i + 1] = sqrt((vT_c[i + 1] * k * pow(vR[i + 1], 3)) / (mu_p * m_p * G * M_compact));
-				vV[i + 1] = alpha(vT_c[i + 1]) * sqrt((vT_c[i + 1] * k) / (mu_p * m_p)) * vH[i + 1];
+				vV[i + 1] = alpha(vT_eff[i]) * sqrt((vT_c[i + 1] * k) / (mu_p * m_p)) * vH[i + 1];
 			});
 		//}
 
@@ -597,7 +588,7 @@ void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilo
 			if (atan(H[i + 1] / R[i + 1]) < atan(H[j] / R[j]))
 			{
 				n++;
-				if(n > N_grids/50)
+				if (n > 0)
 				{
 					T_irr[i + 1] = 0;
 					shadow = true;
@@ -657,5 +648,3 @@ double average(double numbers[], int size) {
 	});
 	return sum / (double)size;
 }
-
-
