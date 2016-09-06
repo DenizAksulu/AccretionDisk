@@ -6,6 +6,7 @@
 //#include <amp.h>
 #include <ppl.h>
 #include <chrono>
+#include <sstream>
 
 using namespace std;
 using namespace :: Concurrency;
@@ -52,7 +53,12 @@ static double L_instant = 0;
 static double L_previous = 0;
 static double alpha_hot = 0.1;
 static double alpha_cold = 0.033;
+
 static bool Corona = false;
+
+static double opacity[19][70];
+static double logR[19] = { -8, -7.5, -7, -6.5, -6, -5.5, -5, -4.5, -4, -3.5, -3, -2.5, -2, -1.5, -1, -0.5, 0, 0.5, 1 };
+static double logT[70];
 
 double OpticalThickness(double SurfaceDensity);
 double NormalizationGaussian(double Mu, double Sigma, double R_isco, double R_outer, double M_disk);
@@ -75,6 +81,31 @@ int main()
 	wcout << "Default accelerator is: " << acc.description << "\n";
 	wcout << "Accelerator memory is: " << acc.get_dedicated_memory() << " kB\n";
 	wcout << "Supports double precision operations: " << acc.get_supports_double_precision() << "\n\n";*/
+
+	// Read opacity table******************************************************************************************************************************
+	//********************************************************************************************************************************************************
+	ifstream opal("table#126.txt");
+	if (opal.is_open())
+	{
+		int row = 0, col = 0;
+		while (!opal.eof())
+		{
+			string line;
+			getline(opal, line);
+			stringstream ss(line);
+			ss >> logT[row];
+			col = 0;
+			while (ss >> opacity[col][row])
+			{
+				col++;
+			}
+			row++;
+		}
+	}
+	else
+	{
+		cout << "Opacity table not found!\n";
+	}
 
 	cout << "Please enter the mass of the compact object. (M_solar)\n";
 	double n; cin >> n;
@@ -119,6 +150,8 @@ int main()
 	double* vT_sur = new double[N_grids];			// Surface mass density vector
 	double* vdelta_T = new double[N_grids];			// Surface mass density vector
 	double* vH = new double[N_grids];
+	double* vO = new double[N_grids];
+
 	double dT;
 	double vJ_total = 0;
 	vM_dot[N_grids - 1] = M_dot_boundary;
@@ -149,6 +182,7 @@ int main()
 		vS[i] = vX[i]*vE[i];
 		vV[i] = VISC_C(0) * pow(vX[i], (4. / 3.)) * pow(vS[i], (2. / 3.));
 		vJ_total += 4 * PI * sqrt(G * M_compact) * vX[i] * vS[i] * delta_X;
+		vO[i] = thompson / m_p;
 	});
 	parallel_for(0, N_grids - 2, [=](int i)
 	{
@@ -157,12 +191,52 @@ int main()
 			vT_eff[i] = pow(3 * G * M_compact * vM_dot[i] / (8 * PI * a * pow(vX[i], 6)) * (1 - sqrt(X_isco / pow(vX[i], 2))), 0.25);
 		else
 			vT_eff[i] = 0;
+
 		if (vM_dot[i] >= 0)
 			vT_c[i] = pow(3 * OpticalThickness(vE[i]) * pow(vT_eff[i], 4) / 4, 0.25);
 			
 		else
 			vT_c[i] = 0;
 		vH[i] = sqrt((vT_c[i] * k * pow(vR[i], 3)) / (mu_p * m_p * G * M_compact));
+
+
+
+		// Find Opacity value*****************************************************
+		//************************************************************************
+		/*int a = 0, b = 0;
+		for (int m = 0; m < 19; m++)
+		{
+			if (vH[i] > 0 && vH[i] < 1e13)
+			{
+				if (log10(vE[i] / vH[i] / pow(vT_eff[i] * 1e-6, 3)) >= logR[18])
+				{
+					a = 18;
+					break;
+				}
+				if (log10(vE[i] / vH[i] / pow(vT_eff[i] * 1e-6, 3)) < logR[m])
+				{
+					a = m;
+					break;
+				}
+			}
+		}
+
+		for (int n = 0; n < 70; n++)
+		{
+			if (log10(vT_c[i]) >= logT[69])
+			{
+				b = 69;
+				break;
+			}
+			if (log10(vT_c[i]) < logT[n])
+			{
+				b = n;
+				break;
+			}
+		}
+		vO[i] = pow(10, opacity[a][b]);*/
+		//************************************************************************
+		//************************************************************************
 	});
 
 	L_instant = (vM_dot[0] * G * M_compact) / (2 * R_isco);		// Luminosity in ergs/s
@@ -200,6 +274,7 @@ int main()
 	WriteGraphData(vR, vT_c, N_grids - 2, "TcvsR.txt", false);
 	WriteGraphData(vR, vH, N_grids - 2, "HvsR.txt", false);
 	WriteGraphData(vR, vT_sur, N_grids - 2, "TsurvsR.txt", false);
+	WriteGraphData(vR, vO, N_grids, "OvsR.txt", false);
 
 
 
@@ -290,25 +365,63 @@ int main()
 		{
 			vE[i] = vS[i] / vX[i];
 		});
+
+
 		parallel_for(0, N_grids - 2, [=](int i)
 		{
-			vM_dot[i] = 3. * PI * (vV[i + 1] * vS[i + 1] - vV[i] * vS[i]) / delta_X;
+			// Find Opacity value*****************************************************
+			//************************************************************************
+			/*int a = 0, b = 0;
+			for (int m = 0; m < 19; m++)
+			{
+				if (vH[i] > 0 && vH[i] < 1e13)
+				{
+					if (log10(vE[i] / vH[i] / pow(vT_eff[i] * 1e-6, 3)) >= logR[18])
+					{
+						a = 18;
+						break;
+					}
+					if (log10(vE[i] / vH[i] / pow(vT_eff[i] * 1e-6, 3)) < logR[m])
+					{
+						a = m;
+						break;
+					}
+				}
+			}
+
+			for (int n = 0; n < 70; n++)
+			{
+				if (log10(vT_c[i]) >= logT[69])
+				{
+					b = 69;
+					break;
+				}
+				if (log10(vT_c[i]) < logT[n])
+				{
+					b = n;
+					break;
+				}
+			}
+			vO[i + 1] = pow(10, opacity[a][b]);*/
+			//************************************************************************
+			//************************************************************************
+			vM_dot[i + 1] = 3. * PI * (vV[i + 2] * vS[i + 2] - vV[i + 1] * vS[i + 1]) / delta_X;
 			vT_eff[i + 1] = pow(3 * G * M_compact * abs(vM_dot[i + 1]) / (8 * PI * a * pow(vX[i + 1], 6)) * (1 - sqrt(X_isco / pow(vX[i + 1], 2))), 0.25);
-			vT_c[i + 1] = pow(3 * OpticalThickness(vE[i + 1]) * pow(vT_eff[i + 1], 4) / 4, 0.25);
+			vT_c[i + 1] = pow(3 * vE[i + 1] * vO[i + 1] * pow(vT_eff[i + 1], 4) / 4, 0.25);
 			vH[i + 1] = sqrt((vT_c[i + 1] * k * pow(vR[i + 1], 3)) / (mu_p * m_p * G * M_compact));
 		});
 
 		L_instant = (vM_dot[0] * G * M_compact) / (2 * R_isco);		// Luminosity in ergs/s
 
 		
-		if (T > T_L + T_corona)
-		{
+		//if (T > T_L + T_corona)
+		//{
 			if (message)
 			{
 				cout << "Corona has formed at time T = " << T << " s.\n" << elapsed.count() << " ms have elapsed.\n";
 				message = false;
 			}
-			IrradiationTemperature(vT_irr, N_grids, 10, 0.5, L_instant, vR, vH);
+			IrradiationTemperature(vT_irr, N_grids, 2, 0.5, L_instant, vR, vH);
 
 			parallel_for(0, N_grids - 2, [=](int i)
 			{
@@ -318,11 +431,11 @@ int main()
 
 			parallel_for(0, N_grids - 2, [=](int i)
 			{
-				vT_c[i + 1] = pow(3 * OpticalThickness(vE[i + 1]) * pow(vT_eff[i + 1], 4) / 8 + (pow(vT_irr[i + 1], 4)), 0.25);
+				vT_c[i + 1] = pow(3 * vE[i + 1] * vO[i + 1] * pow(vT_eff[i + 1], 4) / 8 + (pow(vT_irr[i + 1], 4)), 0.25);
 				vH[i + 1] = sqrt((vT_c[i + 1] * k * pow(vR[i + 1], 3)) / (mu_p * m_p * G * M_compact));
-				vV[i + 1] = alpha(vT_c[i]) * sqrt((vT_c[i + 1] * k) / (mu_p * m_p)) * vH[i + 1];
+				vV[i + 1] = alpha(vT_c[i + 1]) * sqrt((vT_c[i + 1] * k) / (mu_p * m_p)) * vH[i + 1];
 			});
-		}
+		//}
 
 		T += dT; // Increase time
 
@@ -403,6 +516,7 @@ int main()
 			WriteGraphData(vR, vT_irr, N_grids - 2, "TirrvsR.txt", true);
 			WriteGraphData(vR, vT_sur, N_grids - 2, "TsurvsR.txt", true);
 			WriteGraphData(vR, vH, N_grids - 2, "HvsR.txt", true);
+			WriteGraphData(vR, vO, N_grids, "OvsR.txt", true);
 
 			end = std::chrono::high_resolution_clock::now();
 			elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
@@ -543,3 +657,5 @@ double average(double numbers[], int size) {
 	});
 	return sum / (double)size;
 }
+
+
