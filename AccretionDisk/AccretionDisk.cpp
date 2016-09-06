@@ -317,12 +317,13 @@ int main()
 		file << T << "\t" << L_instant << "\n";						// Write luminosity to file
 	file.close();
 	L_previous = 0.1;
+	bool message = true;
 	while (T < T_max)
 	{
 		// Determine outer boundary condition*************************************************************
 		//************************************************************************************************
 		vS[N_grids - 1] = pow(((vM_dot[N_grids - 2] * delta_X / (3. * PI) + vS[N_grids - 2] * vV[N_grids - 2]) 
-			/ (VISC_C(vT_eff[N_grids - 1]) * pow(vX[N_grids - 1], (4. / 3.)))),
+			/ (VISC_C(vT_c[N_grids - 1]) * pow(vX[N_grids - 1], (4. / 3.)))),
 			(3. / 5.));
 		//************************************************************************************************
 		//************************************************************************************************
@@ -346,7 +347,7 @@ int main()
 			
 			vS_new[i + 1] = vS[i + 1] + 0.75 * dT / pow((vX[i + 1] * delta_X), 2) *
 				(vV[i + 2] * vS[i + 2] + vV[i] * vS[i] - 2. * vV[i + 1] * vS[i + 1]);
-			vV_new[i + 1] = VISC_C(vT_eff[i + 1]) * pow(vX[i + 1], (4./3.)) * pow(vS_new[i + 1], (2. / 3.));
+			vV_new[i + 1] = VISC_C(vT_c[i + 1]) * pow(vX[i + 1], (4./3.)) * pow(vS_new[i + 1], (2. / 3.));
 		});
 		//*************************************************************************************************
 		//*************************************************************************************************
@@ -415,17 +416,12 @@ int main()
 		
 		//if (T > T_L + T_corona)
 		//{
-<<<<<<< HEAD
 			if (message)
 			{
 				cout << "Corona has formed at time T = " << T << " s.\n" << elapsed.count() << " ms have elapsed.\n";
 				message = false;
 			}
 			IrradiationTemperature(vT_irr, N_grids, 2, 0.5, L_instant, vR, vH);
-=======
-
-			IrradiationTemperature(vT_irr, N_grids, 0.1, 0.5, L_instant, vR, vH);
->>>>>>> parent of e8ef2c3... v0.5.6
 
 			parallel_for(0, N_grids - 2, [=](int i)
 			{
@@ -437,11 +433,7 @@ int main()
 			{
 				vT_c[i + 1] = pow(3 * vE[i + 1] * vO[i + 1] * pow(vT_eff[i + 1], 4) / 8 + (pow(vT_irr[i + 1], 4)), 0.25);
 				vH[i + 1] = sqrt((vT_c[i + 1] * k * pow(vR[i + 1], 3)) / (mu_p * m_p * G * M_compact));
-<<<<<<< HEAD
 				vV[i + 1] = alpha(vT_c[i + 1]) * sqrt((vT_c[i + 1] * k) / (mu_p * m_p)) * vH[i + 1];
-=======
-				vV[i + 1] = alpha(vT_eff[i]) * sqrt((vT_c[i + 1] * k) / (mu_p * m_p)) * vH[i + 1];
->>>>>>> parent of e8ef2c3... v0.5.6
 			});
 		//}
 
@@ -598,13 +590,18 @@ void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilo
 	bool shadow = false;
 	parallel_for(0, N_grids - 1, [=, &shadow](int i)
 	{
+		int n = 0;
 		shadow = false;
-		parallel_for(0, i + 1, [=, &shadow](int j)
+		parallel_for(0, i + 1, [=, &shadow, &n](int j)
 		{
 			if (atan(H[i + 1] / R[i + 1]) < atan(H[j] / R[j]))
 			{
-				T_irr[i + 1] = 0;
-				shadow = true;
+				n++;
+				if(n > N_grids/50)
+				{
+					T_irr[i + 1] = 0;
+					shadow = true;
+				}
 			}
 		});
 		if (!shadow)
