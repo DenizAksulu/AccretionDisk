@@ -585,7 +585,7 @@ void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilo
 		shadow = false;
 		parallel_for(0, i + 1, [=, &shadow, &n](int j)
 		{
-			if (atan(H[i + 1] / R[i + 1]) < atan(H[j] / R[j]))
+			if (atan((H[i + 1] - 1e6) / R[i + 1]) < atan((H[j] - 1e6) / R[j]))
 			{
 				n++;
 				if (n > 0)

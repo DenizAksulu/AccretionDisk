@@ -1,5 +1,7 @@
 set xlabel "Time (s)"
 set ylabel "Luminosity (erg/s)"
+
+
 samples(x) = $0 > 4 ? 5 : ($0+1)
 avg5(x) = (shift5(x), (back1+back2+back3+back4+back5)/samples($0))
 shift5(x) = (back5 = back4, back4 = back3, back3 = back2, back2 = back1, back1 = x)
