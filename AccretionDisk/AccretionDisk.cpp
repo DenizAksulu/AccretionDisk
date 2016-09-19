@@ -68,8 +68,11 @@ void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilo
 double* IrradiationTemperaturePower_4(int N_grids, double nu, double epsilon, double L, double* R, double* H);
 double alpha(double T);									// alpha parameter for disk
 double mu_p(double T);									// 
-double VISC_C(double T);
-double average(double numbers[], int size);
+double VISC_C(double T_c, double T_irr, double R);
+double average(double numbers[], int size); 
+double alpha_alternative(double T_c, double T_irr, double R);
+double T_c_max(double T_irr, double R);
+double T_c_min(double T_irr, double R);
 double irr_effect(double T_irr);
 
 int main()
@@ -178,7 +181,7 @@ int main()
 		vR[i] = vX[i]*vX[i];
 		vE[i] = E_0 * exp(-1 * (pow((vR[i] - Mu), 2.)) / (2. * pow(Sigma, 2.)));
 		vS[i] = vX[i]*vE[i];
-		vV[i] = VISC_C(0) * pow(vX[i], (4. / 3.)) * pow(vS[i], (2. / 3.));
+		vV[i] = VISC_C(0, 0, vR[i]) * pow(vX[i], (4. / 3.)) * pow(vS[i], (2. / 3.));
 		vJ_total += 4 * PI * sqrt(G * M_compact) * vX[i] * vS[i] * delta_X;
 		vO[i] = thompson / m_p;
 	});
@@ -293,7 +296,7 @@ int main()
 	{
 		vT_sample[i - 1] = exp(i*deltaT_sample);
 	}
-	int N_L_sample = 30000;
+	int N_L_sample = 10000;
 	double* vLT_sample = new double[N_L_sample];
 	double deltaLT_sample = log(T_max) / (double)N_L_sample;
 	for (int i = 1; i <= N_L_sample; i++)
@@ -317,7 +320,7 @@ int main()
 		// Determine outer boundary condition*************************************************************
 		//************************************************************************************************
 		vS[N_grids - 1] = pow(((vM_dot[N_grids - 2] * delta_X / (3. * PI) + vS[N_grids - 2] * vV[N_grids - 2]) 
-			/ (VISC_C(vT_eff[N_grids - 1]) * pow(vX[N_grids - 1], (4. / 3.)))),
+			/ (VISC_C(vT_c[N_grids - 1], vT_irr[N_grids - 1], vR[N_grids - 1]) * pow(vX[N_grids - 1], (4. / 3.)))),
 			(3. / 5.));
 		//************************************************************************************************
 		//************************************************************************************************
@@ -341,7 +344,7 @@ int main()
 			
 			vS_new[i + 1] = vS[i + 1] + 0.75 * dT / pow((vX[i + 1] * delta_X), 2) *
 				(vV[i + 2] * vS[i + 2] + vV[i] * vS[i] - 2. * vV[i + 1] * vS[i + 1]);
-			vV_new[i + 1] = VISC_C(vT_eff[i + 1]) * pow(vX[i + 1], (4./3.)) * pow(vS_new[i + 1], (2. / 3.));
+			vV_new[i + 1] = VISC_C(vT_c[i + 1], vT_irr[i + 1], vR[i + 1]) * pow(vX[i + 1], (4./3.)) * pow(vS_new[i + 1], (2. / 3.));
 		});
 		//*************************************************************************************************
 		//*************************************************************************************************
@@ -427,7 +430,7 @@ int main()
 			{
 				vT_c[i + 1] = pow(3 * vE[i + 1] * vO[i + 1] * (pow(vT_eff[i + 1], 4)) / 8 + pow(vT_irr[i + 1], 4), 0.25); // Dubus et. al. (2014)
 				vH[i + 1] = sqrt((vT_c[i + 1] * k * pow(vR[i + 1], 3)) / (mu_p(vT_eff[i + 1]) * m_p * G * M_compact));
-				vV[i + 1] = alpha(vT_eff[i]) * sqrt((vT_c[i + 1] * k) / (mu_p(vT_eff[i + 1]) * m_p)) * vH[i + 1];
+				vV[i + 1] = alpha_alternative(vT_c[i], vT_irr[i], vR[i]) * sqrt((vT_c[i + 1] * k) / (mu_p(vT_eff[i + 1]) * m_p)) * vH[i + 1];
 			});
 		//}
 
@@ -591,7 +594,7 @@ void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilo
 			if (atan((H[i + 1] - 1e6) / R[i + 1]) < atan((H[j] - 1e6) / R[j]))
 			{
 				n++;
-				if (n > 0)
+				if (n > 10)
 				{
 					T_irr[i + 1] = 0;
 					shadow = true;
@@ -641,7 +644,7 @@ double mu_p(double T)
 	else return mu_p_cold;
 }
 
-double VISC_C(double T)
+double VISC_C(double T_c, double T_irr, double R)
 {
 	double VIS_C = pow(
 		(27. / 32.) * (pow(alpha(T), 4) * pow(k, 4) * thompson)
