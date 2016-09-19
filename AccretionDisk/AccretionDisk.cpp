@@ -44,7 +44,8 @@ static double R_isco, R_outer, X_isco, X_outer;		// Inner and outer radius
 static int N_grids;									// Number of grids
 static int N_sample;									// Number of samples
 static double delta_X;									// Step size
-static double mu_p = 0.6;								// proton ratio
+static double mu_p_hot = 0.63;								// proton ratio (ertan, 2002)
+static double mu_p_cold = 0.87;								// proton ratio
 static double T_max;
 static double T_L = 99999999999;
 static double T_corona;
@@ -66,8 +67,10 @@ void ExtractSpectrum(double* T, double* X, double delta_X, int N_grids, double m
 void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilon, double L, double* R, double* H);
 double* IrradiationTemperaturePower_4(int N_grids, double nu, double epsilon, double L, double* R, double* H);
 double alpha(double T);									// alpha parameter for disk
+double mu_p(double T);									// 
 double VISC_C(double T);
 double average(double numbers[], int size);
+double irr_effect(double T_irr);
 
 int main()
 {
@@ -131,7 +134,7 @@ int main()
 
 	// Read opacity table******************************************************************************************************************************
 	//********************************************************************************************************************************************************
-	ifstream opal("table#126.txt");
+	ifstream opal("table#73.txt");
 	if (opal.is_open())
 	{
 		int row = 0, col = 0;
@@ -191,7 +194,7 @@ int main()
 			
 		else
 			vT_c[i] = 0;
-		vH[i] = sqrt((vT_c[i] * k * pow(vR[i], 3)) / (mu_p * m_p * G * M_compact));
+		vH[i] = sqrt((vT_c[i] * k * pow(vR[i], 3)) / (mu_p(vT_eff[i]) * m_p * G * M_compact));
 		// Find Opacity value*****************************************************
 		//************************************************************************
 		int a = 0, b = 0;
@@ -290,7 +293,7 @@ int main()
 	{
 		vT_sample[i - 1] = exp(i*deltaT_sample);
 	}
-	int N_L_sample = 15000;
+	int N_L_sample = 30000;
 	double* vLT_sample = new double[N_L_sample];
 	double deltaLT_sample = log(T_max) / (double)N_L_sample;
 	for (int i = 1; i <= N_L_sample; i++)
@@ -364,7 +367,7 @@ int main()
 		{
 			vT_eff[i + 1] = pow(3 * G * M_compact * abs(vM_dot[i + 1]) / (8 * PI * a * pow(vX[i + 1], 6)) * (1 - sqrt(X_isco / pow(vX[i + 1], 2))), 0.25);
 			vT_c[i + 1] = pow(3 * OpticalThickness(vE[i + 1]) * pow(vT_eff[i + 1], 4) / 4, 0.25);
-			vH[i + 1] = sqrt((vT_c[i + 1] * k * pow(vR[i + 1], 3)) / (mu_p * m_p * G * M_compact));
+			vH[i + 1] = sqrt((vT_c[i + 1] * k * pow(vR[i + 1], 3)) / (mu_p(vT_eff[i + 1]) * m_p * G * M_compact));
 
 
 			// Find Opacity value*****************************************************
@@ -412,7 +415,7 @@ int main()
 				cout << "Corona has formed at time T = " << T << " s.\n" << elapsed.count() << " ms have elapsed.\n";
 				message = false;
 			}
-			IrradiationTemperature(vT_irr, N_grids, 10, 0.5, L_instant, vR, vH);
+			IrradiationTemperature(vT_irr, N_grids, 0.1, 0.9, L_instant, vR, vH); // Dubus et. al. (2014)
 
 			parallel_for(0, N_grids - 2, [=](int i)
 			{
@@ -422,9 +425,9 @@ int main()
 
 			parallel_for(0, N_grids - 2, [=](int i)
 			{
-				vT_c[i + 1] = pow(3 * vE[i + 1] * vO[i + 1] * (pow(vT_eff[i + 1], 4) + pow(vT_irr[i + 1], 4)) / 8, 0.25);
-				vH[i + 1] = sqrt((vT_c[i + 1] * k * pow(vR[i + 1], 3)) / (mu_p * m_p * G * M_compact));
-				vV[i + 1] = alpha(vT_eff[i]) * sqrt((vT_c[i + 1] * k) / (mu_p * m_p)) * vH[i + 1];
+				vT_c[i + 1] = pow(3 * vE[i + 1] * vO[i + 1] * (pow(vT_eff[i + 1], 4)) / 8 + pow(vT_irr[i + 1], 4), 0.25); // Dubus et. al. (2014)
+				vH[i + 1] = sqrt((vT_c[i + 1] * k * pow(vR[i + 1], 3)) / (mu_p(vT_eff[i + 1]) * m_p * G * M_compact));
+				vV[i + 1] = alpha(vT_eff[i]) * sqrt((vT_c[i + 1] * k) / (mu_p(vT_eff[i + 1]) * m_p)) * vH[i + 1];
 			});
 		//}
 
@@ -597,7 +600,8 @@ void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilo
 		});
 		if (!shadow)
 		{
-			double C = nu * (1 - epsilon)*((H[i + 1] - H[i]) / (R[i + 1] - R[i]) - H[i + 1] / R[i + 1]);
+			//double C = nu * (1 - epsilon)*((H[i + 1] - H[i]) / (R[i + 1] - R[i]) - H[i + 1] / R[i + 1]);
+			double C = nu * (1 - epsilon)*(2./35.)*(H[i + 1] / R[i + 1]); // lasota (2014)
 			if (C > 0 && L > 0)
 				T_irr[i + 1] = pow(C * L / (4 * PI * a * R[i + 1]), 0.25);
 			else
@@ -630,11 +634,18 @@ double alpha(double T)
 	else return alpha_cold;
 }
 
+double mu_p(double T)
+{
+	if (T > 10000)
+		return mu_p_hot;
+	else return mu_p_cold;
+}
+
 double VISC_C(double T)
 {
 	double VIS_C = pow(
 		(27. / 32.) * (pow(alpha(T), 4) * pow(k, 4) * thompson)
-		/ (pow(mu_p, 4) * pow(m_p, 5) * a * G * M_compact)
+		/ (pow(mu_p(T), 4) * pow(m_p, 5) * a * G * M_compact)
 		, (1. / 3.));
 	return VIS_C;
 }
@@ -647,4 +658,23 @@ double average(double numbers[], int size) {
 			sum += numbers[i];
 	});
 	return sum / (double)size;
+}
+/*
+ *  Dubus et. al. (2001)
+ */
+double alpha_alternative(double T_c, double T_irr, double R)
+{
+	return pow(log10(alpha_cold) + (log10(alpha_hot) - log10(alpha_cold))*pow(1 + pow((0.5*(T_c_max(T_irr, R) + T_c_min(T_irr, R))) / T_c, 8), -1), 10);
+}
+double T_c_max(double T_irr, double R)
+{
+	return 10700 * pow(alpha_cold, -0.1) * pow(R / 1e10, -0.37 + 0.1 * irr_effect(T_irr));
+}
+double T_c_min(double T_irr, double R)
+{
+	return (20900 - 11300 * irr_effect(T_irr)) * pow(alpha_hot, -0.22)* pow(M_compact / M_solar, -0.01) * pow(R / 1e10, 0.05 - 0.12 * irr_effect(T_irr));
+}
+double irr_effect(double T_irr)
+{
+	return pow(T_irr / 1e4, 2);
 }
