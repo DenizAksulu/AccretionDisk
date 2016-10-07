@@ -51,6 +51,9 @@ static double T_L = 99999999999;
 static double T_corona;
 static double T = 0;
 static double L_instant = 0;
+static double L_BB = 0;
+static double L_optical = 0;
+static double L_X = 0;
 static double L_previous = 0;
 static double alpha_hot = 0.1;
 static double alpha_cold = 0.033;
@@ -75,6 +78,8 @@ double T_critical(double T_irr, double R);
 double T_c_max(double T_irr, double R);
 double T_c_min(double T_irr, double R);
 double irr_effect(double T_irr);
+double BB_Luminosity(double* T_eff, double* X);
+double GetLuminosity(double* T, double* X, double delta_X, int N_grids, double minEnergyEV, double maxEnergyEV, double resolutionEV);
 
 int main()
 {
@@ -186,6 +191,8 @@ int main()
 		vJ_total += 4 * PI * sqrt(G * M_compact) * vX[i] * vS[i] * delta_X;
 		vO[i] = thompson / m_p;
 		vT_irr[i] = 0;
+		vT_eff[i] = 0;
+		vT_c[i] = 0;
 	});
 	parallel_for(0, N_grids - 2, [=](int i)
 	{
@@ -279,14 +286,13 @@ int main()
 	{
 		vT_sample[i - 1] = exp(i*deltaT_sample);
 	}
-	int N_L_sample = 10000;
+	int N_L_sample = 500;
 	double* vLT_sample = new double[N_L_sample];
 	double deltaLT_sample = log(T_max) / (double)N_L_sample;
 	for (int i = 1; i <= N_L_sample; i++)
 	{
 		vLT_sample[i - 1] = exp(i*deltaLT_sample);
 	}
-
 	int j = 0;
 	int l = 0;
 	start = chrono::high_resolution_clock::now();
@@ -296,6 +302,25 @@ int main()
 	if (L_instant > 0)
 		file << T << "\t" << L_instant << "\n";						// Write luminosity to file
 	file.close();
+
+	ofstream file_bolo;
+	file_bolo.open("lightcurve_bolo.txt", ios::out);
+	if (L_BB > 1e20)
+		file_bolo << T << "\t" << L_BB << "\n";						// Write luminosity to file
+	file_bolo.close();
+
+	ofstream file_optical;
+	file_optical.open("lightcurve_optical.txt", ios::out);
+	if (L_optical > 1e20)
+		file_optical << T << "\t" << L_optical << "\n";						// Write luminosity to file
+	file_optical.close();
+
+	ofstream file_X;
+	file_X.open("lightcurve_X.txt", ios::out);
+	if (L_X > 1e20)
+		file_X << T << "\t" << L_X << "\n";						// Write luminosity to file
+	file_X.close();
+
 	L_previous = 0.1;
 	bool message = true;
 	while (!(T > T_max))
@@ -398,10 +423,10 @@ int main()
 		{
 			if (message)
 			{
-				cout << "Corona has formed at time T = " << T << " s.\n" << elapsed.count() << " ms have elapsed.\n";
+				cout << "Corona has formed at time T = " << T/day << " days.\n" << elapsed.count() << " ms have elapsed.\n";
 				message = false;
 			}
-			//IrradiationTemperature(vT_irr, N_grids, 1, 0.9, L_instant, vR, vH); // Dubus et. al. (2014)
+			IrradiationTemperature(vT_irr, N_grids, 10, 0.9, L_instant, vR, vH); // Dubus et. al. (2014)
 
 		}
 		else
@@ -411,10 +436,9 @@ int main()
 
 		parallel_for(0, N_grids - 2, [=](int i)
 		{
-			// Uncomment if there is something wrong!
 			vT_c[i + 1] = pow(3 * vE[i + 1] * vO[i + 1] * (pow(vT_eff[i + 1], 4)) / 8 + pow(vT_irr[i + 1], 4), 0.25); // Dubus et. al. (2014)
 			vH[i + 1] = sqrt((vT_c[i + 1] * k * pow(vR[i + 1], 3)) / (mu_p(vT_eff[i + 1]) * m_p * G * M_compact));
-			vV[i + 1] = alpha(vT_eff[i + 1]) * sqrt((vT_c[i + 1] * k) / (mu_p(vT_eff[i + 1]) * m_p)) * vH[i + 1];//alpha_alternative(vT_c[i + 1], vT_irr[i + 1], vR[i + 1]) * sqrt((vT_c[i + 1] * k) / (mu_p(vT_eff[i + 1]) * m_p)) * vH[i + 1]; //
+			vV[i + 1] = alpha_alternative(vT_c[i + 1], vT_irr[i + 1], vR[i + 1]) * sqrt((vT_c[i + 1] * k) / (mu_p(vT_eff[i + 1]) * m_p)) * vH[i + 1]; //
 		});
 
 		T += dT; // Increase time
@@ -436,8 +460,29 @@ int main()
 				l++;
 				file.open("lightcurve.txt", ios::app);
 				if (L_instant > 0)
-					file << T << "\t" << L_instant << "\n";						// Write luminosity to file
+					file << T / day << "\t" << L_instant << "\n";						// Write luminosity to file
 				file.close();
+				parallel_for(0, N_grids, [=](int i)
+				{
+					vT_sur[i] = pow(pow(vT_irr[i], 4) + pow(vT_eff[i], 4), 0.25);
+				});
+				L_BB = BB_Luminosity(vT_sur, vX);
+				file_bolo.open("lightcurve_bolo.txt", ios::app);
+				if (L_BB > 1e20)
+					file_bolo << T / day << "\t" << L_BB << "\n";						// Write luminosity to file
+				file_bolo.close();
+
+				L_optical = GetLuminosity(vT_sur, vX, delta_X, N_grids, 1, 4, 0.01);
+				file_optical.open("lightcurve_optical.txt", ios::app);
+				if (L_optical > 1e20)
+					file_optical << T / day << "\t" << L_optical << "\n";						// Write luminosity to file
+				file_optical.close();
+
+				L_X = GetLuminosity(vT_sur, vX, delta_X, N_grids, 1000, 10000, 1);
+				file_X.open("lightcurve_X.txt", ios::app);
+				if (L_X > 1e20)
+					file_X << T / day << "\t" << L_X << "\n";						// Write luminosity to file
+				file_X.close();
 			}
 		}
 		// Take samples ***********************************************************************************
@@ -501,6 +546,16 @@ double OpticalThickness(double SurfaceDensity)
 	return SurfaceDensity * Opacity;
 }
 
+double BB_Luminosity(double* T_eff, double* X)
+{
+	double L = 0;
+	for(int i = 0; i < N_grids; i++)
+	{
+		L += pow(X[i], 3) * pow(T_eff[i], 4) * a * 4 * PI * delta_X;
+	}
+	return L;
+}
+
 void ExtractSpectrum(double* T, double* X, double delta_X, int N_grids, double minEnergyEV, double maxEnergyEV, double resolutionEV, bool append)
 {
 	int numberofchannels = (maxEnergyEV - minEnergyEV) / resolutionEV;
@@ -523,6 +578,34 @@ void ExtractSpectrum(double* T, double* X, double delta_X, int N_grids, double m
 	});
 	WriteGraphData(eV, I_bb, numberofchannels, "powerspectrum.txt", append);
 }
+
+double GetLuminosity(double* T, double* X, double delta_X, int N_grids, double minEnergyEV, double maxEnergyEV, double resolutionEV)
+{
+	int numberofchannels = (maxEnergyEV - minEnergyEV) / resolutionEV;
+	double* I_bb = new double[numberofchannels];
+	double* eV = new double[numberofchannels];
+	parallel_for(0, numberofchannels, [=](int i)
+	{
+		I_bb[i] = 0;
+		eV[i] = minEnergyEV + resolutionEV * i;
+	});
+	parallel_for(0, N_grids - 2, [=](int i)
+	{
+		parallel_for(0, numberofchannels, [=](int j)
+		{
+			if (T[i + 1] != 0)
+				I_bb[j] += (2 * h * pow(eVtoHz(eV[j]), 3) / pow(c, 2)) / (exp((h * eVtoHz(eV[j])) /
+				(k * T[i + 1])) - 1)
+				* 4 * PI * pow(X[i], 3) * delta_X; // infinitesimal area
+		});
+	});
+	double L = 0;
+	parallel_for(0, numberofchannels, [=, &L](int i)
+	{
+		L += I_bb[i];
+	});
+	return L;
+}
 // Point source assumed
 void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilon, double L, double* R, double* H)
 {
@@ -536,7 +619,7 @@ void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilo
 			if (atan((H[i + 1]) / R[i + 1]) < atan((H[j]) / R[j]))
 			{
 				n++;
-				if (n > 20)
+				if (n > 50)
 				{
 					T_irr[i + 1] = 0;
 					shadow = true;
@@ -546,7 +629,7 @@ void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilo
 		if (!shadow)
 		{
 			//double C = nu * (1 - epsilon)*((H[i + 1] - H[i]) / (R[i + 1] - R[i]) - H[i + 1] / R[i + 1]);
-			double C = 5e-3;// nu * (1 - epsilon)*(2. / 35.)*(H[i + 1] / R[i + 1]); // lasota (2014)
+			double C = /*5e-3;*/ nu * (1 - epsilon)*(2. / 35.)*(H[i + 1] / R[i + 1]); // lasota (2014)
 			if (C > 0 && L > 0)
 				T_irr[i + 1] = pow(C * L / (4 * PI * a * R[i + 1] * R[i + 1]), 0.25);
 			else
@@ -589,7 +672,7 @@ double mu_p(double T)
 double VISC_C(double T_c, double T_irr, double R)
 {
 	double VIS_C = pow(
-		(27. / 32.) * (pow(alpha(T_c)/*alpha_alternative(T_c, T_irr, R)*/, 4) * pow(k, 4) * thompson)
+		(27. / 32.) * ((alpha_alternative(T_c, T_irr, R), 4) * pow(k, 4) * thompson)
 		/ (pow(mu_p(T_c), 4) * pow(m_p, 5) * a * G * M_compact)
 		, (1. / 3.));
 	return VIS_C;
@@ -609,7 +692,13 @@ double average(double numbers[], int size) {
  */
 double alpha_alternative(double T_c, double T_irr, double R)
 {
-	return exp(log(alpha_cold) + (log(alpha_hot) - log(alpha_cold)) * pow(1 + pow(T_critical(T_irr, R) / T_c, 8), -1));
+	//return exp(log(alpha_cold) + (log(alpha_hot) - log(alpha_cold)) * pow(1 + pow(T_critical(T_irr, R) / T_c, 8), -1));
+	if (T_c_max(T_irr, R) > T_c_min(T_irr, R))
+	{
+		return alpha_hot;
+	}
+	else
+		return alpha_cold;
 }
 double T_critical(double T_irr, double R)
 {

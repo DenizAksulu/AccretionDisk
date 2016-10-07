@@ -13,4 +13,4 @@ init(x) = (back1 = back2 = back3 = back4 = back5 = sum = 0)
 datafile = 'lightcurve.txt'
 set logscale xy
 
-plot "lightcurve.txt" with lines, "lightcurve_bolo.txt" with lines, "lightcurve_optical.txt" with lines, "lightcurve_X.txt" with lines
+plot "lightcurve_optical.txt" with lines, "lightcurve_X.txt" with lines
