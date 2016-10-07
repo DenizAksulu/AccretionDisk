@@ -49,7 +49,6 @@ static double mu_p_cold = 0.87;								// proton ratio
 static double T_max;
 static double T_L = 99999999999;
 static double T_corona;
-static double T = 0;
 static double L_instant = 0;
 static double L_BB = 0;
 static double L_optical = 0;
@@ -74,7 +73,6 @@ double mu_p(double T);									//
 double VISC_C(double T_c, double T_irr, double R);
 double average(double numbers[], int size); 
 double alpha_alternative(double T_c, double T_irr, double R);
-double T_critical(double T_irr, double R);
 double T_c_max(double T_irr, double R);
 double T_c_min(double T_irr, double R);
 double irr_effect(double T_irr);
@@ -83,8 +81,7 @@ double GetLuminosity(double* T, double* X, double delta_X, int N_grids, double m
 
 int main()
 {
-
-
+	double T = 0;
 	cout << "Accretion disk simulation with parallel CPU computing.\n\n";
 	/*accelerator acc;
 
@@ -136,7 +133,7 @@ int main()
 	double* vdelta_T = new double[N_grids];			// Surface mass density vector
 	double* vH = new double[N_grids];
 	double* vO = new double[N_grids];
-	double dT;
+	double dT = 0;
 	double vJ_total = 0;
 	vM_dot[N_grids - 1] = M_dot_boundary;
 	vM_dot[N_grids - 2] = M_dot_boundary;
@@ -191,6 +188,11 @@ int main()
 		vJ_total += 4 * PI * sqrt(G * M_compact) * vX[i] * vS[i] * delta_X;
 		vO[i] = thompson / m_p;
 		vT_irr[i] = 0;
+<<<<<<< HEAD
+=======
+		vH[i] = 0;
+		vdelta_T[i] = 0;
+>>>>>>> origin/master
 		vT_eff[i] = 0;
 		vT_c[i] = 0;
 	});
@@ -214,12 +216,12 @@ int main()
 		{
 			if (vH[i] > 0 && vH[i] < 1e13)
 			{
-				if (log10(vE[i] / vH[i] / pow(vT_eff[i] * 1e-6, 3)) >= logR[18])
+				if (log10((vE[i] / vH[i]) / pow(vT_c[i] * 1e-6, 3)) >= logR[18])
 				{
 					a = 18;
 					break;
 				}
-				if (log10(vE[i] / vH[i] / pow(vT_eff[i] * 1e-6, 3)) < logR[m])
+				if (log10((vE[i] / vH[i]) / pow(vT_c[i] * 1e-6, 3)) < logR[m])
 				{
 					a = m;
 					break;
@@ -247,7 +249,12 @@ int main()
 
 	L_instant = (vM_dot[0] * G * M_compact) / (2 * R_isco);		// Luminosity in ergs/s
 
-	IrradiationTemperature(vT_irr, N_grids, 0, 0.5, L_instant, vR, vH);
+	IrradiationTemperature(vT_irr, N_grids, 2, 0.5, L_instant, vR, vH);
+
+	parallel_for(0, N_grids - 2, [=](int i)
+	{
+		vT_sur[i + 1] = pow(pow(vT_irr[i + 1], 4) + pow(vT_eff[i + 1], 4), 0.25);
+	});
 
 	L_instant = (vM_dot[0] * G * M_compact) / (2 * R_isco);		// Luminosity in ergs/s
 
@@ -322,13 +329,14 @@ int main()
 	file_X.close();
 
 	L_previous = 0.1;
+	T = 0;
 	bool message = true;
-	while (!(T > T_max))
+	while (T < T_max)
 	{
 		// Determine outer boundary condition*************************************************************
 		//************************************************************************************************
 		vS[N_grids - 1] = pow(((vM_dot[N_grids - 2] * delta_X / (3. * PI) + vS[N_grids - 2] * vV[N_grids - 2]) 
-			/ (VISC_C(vT_eff[N_grids - 1], vT_irr[N_grids - 1], vR[N_grids - 1]) * pow(vX[N_grids - 1], (4. / 3.)))),
+			/ (VISC_C(vT_c[N_grids - 1], vT_irr[N_grids - 1], vR[N_grids - 1]) * pow(vX[N_grids - 1], (4. / 3.)))),
 			(3. / 5.));
 		//************************************************************************************************
 		//************************************************************************************************
@@ -336,11 +344,11 @@ int main()
 		// Determine time step****************************************************************************
 		//************************************************************************************************
 
-		parallel_for(1, N_grids - 1, [=] (int i)
+		parallel_for(1, N_grids, [=] (int i)
 		{
 			vdelta_T[i] = (1. / 6.) * (pow(delta_X * vX[i], 2) / vV[i]) / 0.75;
 		});
-		dT = *min_element(vdelta_T + 1, vdelta_T + N_grids - 1);
+		dT = *min_element(vdelta_T + 1, vdelta_T + N_grids);
 		
 		//************************************************************************************************
 		//************************************************************************************************
@@ -352,7 +360,7 @@ int main()
 			
 			vS_new[i + 1] = vS[i + 1] + 0.75 * dT / pow((vX[i + 1] * delta_X), 2) *
 				(vV[i + 2] * vS[i + 2] + vV[i] * vS[i] - 2. * vV[i + 1] * vS[i + 1]);
-			vV_new[i + 1] = VISC_C(vT_eff[i + 1], vT_irr[i + 1], vR[i + 1]) * pow(vX[i + 1], (4./3.)) * pow(vS_new[i + 1], (2. / 3.));
+			vV_new[i + 1] = VISC_C(vT_c[i + 1], vT_irr[i + 1], vR[i + 1]) * pow(vX[i + 1], (4./3.)) * pow(vS_new[i + 1], (2. / 3.));
 		});
 		//*************************************************************************************************
 		//*************************************************************************************************
@@ -386,12 +394,12 @@ int main()
 			int a = 0, b = 0;
 			for (int m = 0; m < 19; m++)
 			{
-				if (log10(vE[i + 1] / vH[i + 1] / pow(vT_eff[i + 1] * 1e-6, 3)) >= logR[18])
+				if (log10((vE[i + 1] / vH[i + 1]) / pow(vT_c[i + 1] * 1e-6, 3)) >= logR[18])
 				{
 					a = 18;
 					break;
 				}
-				if (log10(vE[i + 1] / vH[i + 1] / pow(vT_eff[i + 1] * 1e-6, 3)) < logR[m])
+				if (log10((vE[i + 1] / vH[i + 1]) / pow(vT_c[i + 1] * 1e-6, 3)) < logR[m])
 				{
 					a = m;
 					break;
@@ -426,14 +434,28 @@ int main()
 				cout << "Corona has formed at time T = " << T/day << " days.\n" << elapsed.count() << " ms have elapsed.\n";
 				message = false;
 			}
+<<<<<<< HEAD
 			IrradiationTemperature(vT_irr, N_grids, 10, 0.9, L_instant, vR, vH); // Dubus et. al. (2014)
 
+=======
+			IrradiationTemperature(vT_irr, N_grids, 0.1, 0.9, L_instant, vR, vH); // Dubus et. al. (2014)
+			parallel_for(0, N_grids - 2, [=](int i)
+			{
+				vT_c[i + 1] = pow(3 * vE[i + 1] * vO[i + 1] * (pow(vT_eff[i + 1], 4)) / 8 + pow(vT_irr[i + 1], 4), 0.25); // Dubus et. al. (2014)
+				vH[i + 1] = sqrt((vT_c[i + 1] * k * pow(vR[i + 1], 3)) / (mu_p(vT_eff[i + 1]) * m_p * G * M_compact));
+				vV[i + 1] = alpha_alternative(vT_c[i + 1], vT_irr[i + 1], vR[i + 1]) * sqrt((vT_c[i + 1] * k) / (mu_p(vT_eff[i + 1]) * m_p)) * vH[i + 1];
+			});
+>>>>>>> origin/master
 		}
 		else
 		{
-			IrradiationTemperature(vT_irr, N_grids, 0.1, 0.9, L_instant, vR, vH); // Dubus et. al. (2014)
+			parallel_for(0, N_grids - 2, [=](int i)
+			{
+				vV[i + 1] = alpha_alternative(vT_c[i + 1], vT_irr[i + 1], vR[i + 1]) * sqrt((vT_c[i + 1] * k) / (mu_p(vT_eff[i + 1]) * m_p)) * vH[i + 1];
+			});
 		}
 
+<<<<<<< HEAD
 		parallel_for(0, N_grids - 2, [=](int i)
 		{
 			vT_c[i + 1] = pow(3 * vE[i + 1] * vO[i + 1] * (pow(vT_eff[i + 1], 4)) / 8 + pow(vT_irr[i + 1], 4), 0.25); // Dubus et. al. (2014)
@@ -441,6 +463,8 @@ int main()
 			vV[i + 1] = alpha_alternative(vT_c[i + 1], vT_irr[i + 1], vR[i + 1]) * sqrt((vT_c[i + 1] * k) / (mu_p(vT_eff[i + 1]) * m_p)) * vH[i + 1]; //
 		});
 
+=======
+>>>>>>> origin/master
 		T += dT; // Increase time
 
 		if (l < N_L_sample)
@@ -519,6 +543,7 @@ int main()
 
 double NormalizationGaussian(double Mu, double Sigma, double R_isco, double R_outer, double M_disk)
 {
+	const double PI = 3.14159265358979323846;
 	double IntegralResult = 0.5 * Sigma * (2 * (exp(-0.5 * pow((R_isco - Mu), 2) / pow(Sigma, 2)) - exp(-0.5 *pow((R_outer - Mu), 2) / pow(Sigma, 2))) * Sigma
 		- Mu * sqrt(2 * PI) * erf((R_isco - Mu) / (sqrt(2) * Sigma)) + Mu * sqrt(2 * PI) * erf((R_outer - Mu) / (sqrt(2) * Sigma)));
 	double E_0 = M_disk / (2 * PI * IntegralResult);
@@ -616,10 +641,14 @@ void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilo
 		shadow = false;
 		parallel_for(0, i + 1, [=, &shadow, &n](int j)
 		{
-			if (atan((H[i + 1]) / R[i + 1]) < atan((H[j]) / R[j]))
+			if (atan((H[i + 1] - 1e6) / R[i + 1]) < atan((H[j] - 1e6) / R[j]))
 			{
 				n++;
+<<<<<<< HEAD
 				if (n > 50)
+=======
+				if (n > 10)
+>>>>>>> origin/master
 				{
 					T_irr[i + 1] = 0;
 					shadow = true;
@@ -629,7 +658,11 @@ void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilo
 		if (!shadow)
 		{
 			//double C = nu * (1 - epsilon)*((H[i + 1] - H[i]) / (R[i + 1] - R[i]) - H[i + 1] / R[i + 1]);
+<<<<<<< HEAD
 			double C = /*5e-3;*/ nu * (1 - epsilon)*(2. / 35.)*(H[i + 1] / R[i + 1]); // lasota (2014)
+=======
+			double C = nu * (1 - epsilon)*(2./35.)*(H[i + 1] / R[i + 1]); // lasota (2014)
+>>>>>>> origin/master
 			if (C > 0 && L > 0)
 				T_irr[i + 1] = pow(C * L / (4 * PI * a * R[i + 1] * R[i + 1]), 0.25);
 			else
@@ -672,7 +705,11 @@ double mu_p(double T)
 double VISC_C(double T_c, double T_irr, double R)
 {
 	double VIS_C = pow(
+<<<<<<< HEAD
 		(27. / 32.) * ((alpha_alternative(T_c, T_irr, R), 4) * pow(k, 4) * thompson)
+=======
+		(27. / 32.) * (pow(alpha_alternative(T_c, T_irr, R), 4) * pow(k, 4) * thompson)
+>>>>>>> origin/master
 		/ (pow(mu_p(T_c), 4) * pow(m_p, 5) * a * G * M_compact)
 		, (1. / 3.));
 	return VIS_C;
@@ -692,6 +729,7 @@ double average(double numbers[], int size) {
  */
 double alpha_alternative(double T_c, double T_irr, double R)
 {
+<<<<<<< HEAD
 	//return exp(log(alpha_cold) + (log(alpha_hot) - log(alpha_cold)) * pow(1 + pow(T_critical(T_irr, R) / T_c, 8), -1));
 	if (T_c_max(T_irr, R) > T_c_min(T_irr, R))
 	{
@@ -703,16 +741,19 @@ double alpha_alternative(double T_c, double T_irr, double R)
 double T_critical(double T_irr, double R)
 {
 	return 0.5 * (T_c_max(T_irr, R) + T_c_min(T_irr, R));
+=======
+	return pow(log10(alpha_cold) + (log10(alpha_hot) - log10(alpha_cold))*pow(1 + pow((0.5*(T_c_max(T_irr, R) + T_c_min(T_irr, R))) / T_c, 8), -1), 10);
+>>>>>>> origin/master
 }
 double T_c_max(double T_irr, double R)
 {
-	return 10700 * pow(alpha_cold, -0.1) * pow((R / 1e10), (-0.05 * irr_effect(T_irr)));
+	return 10700 * pow(alpha_cold, -0.1) * pow(R / 1e10, -0.05 * irr_effect(T_irr));
 }
 double T_c_min(double T_irr, double R)
 {
-	return (20900 - 11300 * irr_effect(T_irr)) * pow(alpha_hot, -0.22) * pow((M_compact / M_solar), -0.01) * pow((R / 1e10), (0.05 - 0.12 * irr_effect(T_irr)));
+	return (20900 - 11300 * irr_effect(T_irr)) * pow(alpha_hot, -0.22)* pow(M_compact / M_solar, -0.01) * pow(R / 1e10, 0.05 - 0.12 * irr_effect(T_irr));
 }
 double irr_effect(double T_irr)
 {
-	return pow((T_irr / 1e4), 2);
+	return pow(T_irr / 1e4, 2);
 }
