@@ -49,7 +49,6 @@ static double mu_p_cold = 0.87;								// proton ratio
 static double T_max;
 static double T_L = 99999999999;
 static double T_corona;
-static double T = 0;
 static double L_instant = 0;
 static double L_previous = 0;
 static double alpha_hot = 0.1;
@@ -77,8 +76,7 @@ double irr_effect(double T_irr);
 
 int main()
 {
-
-
+	double T = 0;
 	cout << "Accretion disk simulation with parallel CPU computing.\n\n";
 	/*accelerator acc;
 
@@ -130,7 +128,7 @@ int main()
 	double* vdelta_T = new double[N_grids];			// Surface mass density vector
 	double* vH = new double[N_grids];
 	double* vO = new double[N_grids];
-	double dT;
+	double dT = 0;
 	double vJ_total = 0;
 	vM_dot[N_grids - 1] = M_dot_boundary;
 	vM_dot[N_grids - 2] = M_dot_boundary;
@@ -184,6 +182,11 @@ int main()
 		vV[i] = VISC_C(0, 0, vR[i]) * pow(vX[i], (4. / 3.)) * pow(vS[i], (2. / 3.));
 		vJ_total += 4 * PI * sqrt(G * M_compact) * vX[i] * vS[i] * delta_X;
 		vO[i] = thompson / m_p;
+		vT_irr[i] = 0;
+		vH[i] = 0;
+		vdelta_T[i] = 0;
+		vT_eff[i] = 0;
+		vT_c[i] = 0;
 	});
 	parallel_for(0, N_grids - 2, [=](int i)
 	{
@@ -205,12 +208,12 @@ int main()
 		{
 			if (vH[i] > 0 && vH[i] < 1e13)
 			{
-				if (log10(vE[i] / vH[i] / pow(vT_eff[i] * 1e-6, 3)) >= logR[18])
+				if (log10((vE[i] / vH[i]) / pow(vT_c[i] * 1e-6, 3)) >= logR[18])
 				{
 					a = 18;
 					break;
 				}
-				if (log10(vE[i] / vH[i] / pow(vT_eff[i] * 1e-6, 3)) < logR[m])
+				if (log10((vE[i] / vH[i]) / pow(vT_c[i] * 1e-6, 3)) < logR[m])
 				{
 					a = m;
 					break;
@@ -244,20 +247,6 @@ int main()
 	{
 		vT_sur[i + 1] = pow(pow(vT_irr[i + 1], 4) + pow(vT_eff[i + 1], 4), 0.25);
 	});
-
-	/*
-	* DANGER!!!!!
-	*/
-	/*parallel_for(0, N_grids - 2, [=](int i)
-	{
-		vT_c[i + 1] = pow(3 * OpticalThickness(vE[i + 1]) * pow(vT_eff[i + 1], 4) / 8 + (pow(vT_irr[i + 1], 4)), 0.25);
-		vH[i + 1] = sqrt((vT_c[i + 1] * k * pow(vR[i + 1], 3)) / (mu_p * m_p * G * M_compact));
-		vV[i + 1] = alpha(vT_c[i]) * sqrt((vT_c[i + 1] * k) / (mu_p * m_p)) * vH[i + 1];
-	});*/
-	/*
-	*
-	*
-	*/
 
 	L_instant = (vM_dot[0] * G * M_compact) / (2 * R_isco);		// Luminosity in ergs/s
 
@@ -296,7 +285,7 @@ int main()
 	{
 		vT_sample[i - 1] = exp(i*deltaT_sample);
 	}
-	int N_L_sample = 10000;
+	int N_L_sample = 500;
 	double* vLT_sample = new double[N_L_sample];
 	double deltaLT_sample = log(T_max) / (double)N_L_sample;
 	for (int i = 1; i <= N_L_sample; i++)
@@ -314,6 +303,7 @@ int main()
 		file << T << "\t" << L_instant << "\n";						// Write luminosity to file
 	file.close();
 	L_previous = 0.1;
+	T = 0;
 	bool message = true;
 	while (T < T_max)
 	{
@@ -378,12 +368,12 @@ int main()
 			int a = 0, b = 0;
 			for (int m = 0; m < 19; m++)
 			{
-				if (log10(vE[i + 1] / vH[i + 1] / pow(vT_eff[i + 1] * 1e-6, 3)) >= logR[18])
+				if (log10((vE[i + 1] / vH[i + 1]) / pow(vT_c[i + 1] * 1e-6, 3)) >= logR[18])
 				{
 					a = 18;
 					break;
 				}
-				if (log10(vE[i + 1] / vH[i + 1] / pow(vT_eff[i + 1] * 1e-6, 3)) < logR[m])
+				if (log10((vE[i + 1] / vH[i + 1]) / pow(vT_c[i + 1] * 1e-6, 3)) < logR[m])
 				{
 					a = m;
 					break;
@@ -411,28 +401,28 @@ int main()
 		L_instant = (vM_dot[0] * G * M_compact) / (2 * R_isco);		// Luminosity in ergs/s
 
 		
-		//if (T > T_L + T_corona)
-		//{
+		if (T > T_L + T_corona)
+		{
 			if (message)
 			{
 				cout << "Corona has formed at time T = " << T << " s.\n" << elapsed.count() << " ms have elapsed.\n";
 				message = false;
 			}
 			IrradiationTemperature(vT_irr, N_grids, 0.1, 0.9, L_instant, vR, vH); // Dubus et. al. (2014)
-
-			parallel_for(0, N_grids - 2, [=](int i)
-			{
-				vT_sur[i + 1] = pow(pow(vT_irr[i + 1], 4) + pow(vT_eff[i + 1], 4), 0.25);
-			});
-
-
 			parallel_for(0, N_grids - 2, [=](int i)
 			{
 				vT_c[i + 1] = pow(3 * vE[i + 1] * vO[i + 1] * (pow(vT_eff[i + 1], 4)) / 8 + pow(vT_irr[i + 1], 4), 0.25); // Dubus et. al. (2014)
 				vH[i + 1] = sqrt((vT_c[i + 1] * k * pow(vR[i + 1], 3)) / (mu_p(vT_eff[i + 1]) * m_p * G * M_compact));
-				vV[i + 1] = alpha_alternative(vT_c[i], vT_irr[i], vR[i]) * sqrt((vT_c[i + 1] * k) / (mu_p(vT_eff[i + 1]) * m_p)) * vH[i + 1];
+				vV[i + 1] = alpha_alternative(vT_c[i + 1], vT_irr[i + 1], vR[i + 1]) * sqrt((vT_c[i + 1] * k) / (mu_p(vT_eff[i + 1]) * m_p)) * vH[i + 1];
 			});
-		//}
+		}
+		else
+		{
+			parallel_for(0, N_grids - 2, [=](int i)
+			{
+				vV[i + 1] = alpha_alternative(vT_c[i + 1], vT_irr[i + 1], vR[i + 1]) * sqrt((vT_c[i + 1] * k) / (mu_p(vT_eff[i + 1]) * m_p)) * vH[i + 1];
+			});
+		}
 
 		T += dT; // Increase time
 
@@ -462,47 +452,7 @@ int main()
 		if (T >= vT_sample[j])
 		{
 			j++;
-/*
-			// Obtain E values for central temperature*********************************************************
-			//*************************************************************************************************
-			parallel_for(0, N_grids, [=](int i)
-			{
-				vE[i] = vS[i] / vX[i];
-			});
-			//*************************************************************************************************
-			//*************************************************************************************************
 
-			parallel_for(0, N_grids, [=] (int i)
-			{
-				// Obtain effective temperature ***********************************************************************************************
-				//***************************************************************************************************************************
-				if (vM_dot[i] >= 0)
-					vT_eff[i] = pow(3 * G * M_compact * vM_dot[i] / (8 * PI * a * pow(vX[i], 6)) * (1 - sqrt(X_isco / pow(vX[i], 2))), 0.25);
-				else
-					vT_eff[i] = 0;
-				//***************************************************************************************************************************
-				//***************************************************************************************************************************
-
-				// Obtain central temperature ***********************************************************************************************
-				//***************************************************************************************************************************
-				if (vM_dot[i] >= 0)
-					vT_c[i] = pow(3 * OpticalThickness(vE[i]) * pow(vT_eff[i], 4) / 4, 0.25);
-				//vT_c[i] = pow(9 * OpticalThickness(vS[i] / vX[i]) * G * M_compact * vM_dot[i] / (32 * PI * a * pow(vX[i], 6)) * (1 - sqrt(X_isco / pow(vX[i], 2))), 0.25);
-				else
-					vT_c[i] = 0;
-				//***************************************************************************************************************************
-				//***************************************************************************************************************************
-
-				vH[i] = sqrt((vT_c[i] * k * pow(vR[i], 3)) / (mu_p * m_p * G * M_compact));
-			});
-
-			vT_irr = IrradiationTemperature(N_grids, 0.1, 0.5, L_instant, vR, vH);
-
-			parallel_for(0, N_grids, [=](int i)
-			{
-				vT_sur[i] = pow(pow(vT_irr[i], 4) + pow(vT_eff[i], 4), 0.25);
-			});
-			*/
 			ExtractSpectrum(vT_eff, vX, delta_X, N_grids - 2, 1, 15000, 1, true);
 
 			WriteGraphData(vR, vE, N_grids, "EvsR.txt", true);
@@ -606,7 +556,7 @@ void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilo
 			//double C = nu * (1 - epsilon)*((H[i + 1] - H[i]) / (R[i + 1] - R[i]) - H[i + 1] / R[i + 1]);
 			double C = nu * (1 - epsilon)*(2./35.)*(H[i + 1] / R[i + 1]); // lasota (2014)
 			if (C > 0 && L > 0)
-				T_irr[i + 1] = pow(C * L / (4 * PI * a * R[i + 1]), 0.25);
+				T_irr[i + 1] = pow(C * L / (4 * PI * a * R[i + 1] * R[i + 1]), 0.25);
 			else
 				T_irr[i + 1] = 0;
 		}
@@ -647,8 +597,8 @@ double mu_p(double T)
 double VISC_C(double T_c, double T_irr, double R)
 {
 	double VIS_C = pow(
-		(27. / 32.) * (pow(alpha(T), 4) * pow(k, 4) * thompson)
-		/ (pow(mu_p(T), 4) * pow(m_p, 5) * a * G * M_compact)
+		(27. / 32.) * (pow(alpha_alternative(T_c, T_irr, R), 4) * pow(k, 4) * thompson)
+		/ (pow(mu_p(T_c), 4) * pow(m_p, 5) * a * G * M_compact)
 		, (1. / 3.));
 	return VIS_C;
 }
@@ -671,7 +621,7 @@ double alpha_alternative(double T_c, double T_irr, double R)
 }
 double T_c_max(double T_irr, double R)
 {
-	return 10700 * pow(alpha_cold, -0.1) * pow(R / 1e10, -0.37 + 0.1 * irr_effect(T_irr));
+	return 10700 * pow(alpha_cold, -0.1) * pow(R / 1e10, -0.05 * irr_effect(T_irr));
 }
 double T_c_min(double T_irr, double R)
 {
