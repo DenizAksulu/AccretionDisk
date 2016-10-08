@@ -249,6 +249,8 @@ int main()
 
 	L_instant = (vM_dot[0] * G * M_compact) / (2 * R_isco);		// Luminosity in ergs/s
 
+	IrradiationTemperature(vT_irr, N_grids, 2, 0.5, L_instant, vR, vH);
+
 	parallel_for(0, N_grids - 2, [=](int i)
 	{
 		vT_sur[i + 1] = pow(pow(vT_irr[i + 1], 4) + pow(vT_eff[i + 1], 4), 0.25);

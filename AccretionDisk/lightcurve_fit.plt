@@ -15,6 +15,6 @@ set logscale y
 unset logscale x
 
 f(x) = j*x**8 + a*x**7 + b*x**6 + c*x**5 + d*x**4 + e*x**3 + f*x**2 + g*x + h
-fit f(x) "lightcurve.txt" via a, b, c, d, e, f, g, h, j
+fit [1:] f(x) "lightcurve.txt" via a, b, c, d, e, f, g, h, j
 
-plot f(x) with lines, "lightcurve.txt" with lines
+plot [1:] f(x) with lines, "lightcurve.txt" with lines
