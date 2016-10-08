@@ -11,6 +11,7 @@ shift5(y) = (back5 = back4, back4 = back3, back3 = back2, back2 = back1, back1 =
 #
 init(x) = (back1 = back2 = back3 = back4 = back5 = sum = 0)
 datafile = 'lightcurve.txt'
-set logscale xy
+set logscale y
+unset logscale x
 
 plot "lightcurve.txt" with lines, "lightcurve_bolo.txt" with lines, "lightcurve_optical.txt" with lines, "lightcurve_X.txt" with lines

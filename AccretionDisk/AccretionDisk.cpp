@@ -70,9 +70,10 @@ void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilo
 double* IrradiationTemperaturePower_4(int N_grids, double nu, double epsilon, double L, double* R, double* H);
 double alpha(double T);									// alpha parameter for disk
 double mu_p(double T);									// 
-double VISC_C(double T_c, double T_irr, double R);
+double VISC_C(double T_c, double T_irr, double R, double opacity);
 double average(double numbers[], int size); 
 double alpha_alternative(double T_c, double T_irr, double R);
+double T_critical(double T_irr, double R);
 double T_c_max(double T_irr, double R);
 double T_c_min(double T_irr, double R);
 double irr_effect(double T_irr);
@@ -135,6 +136,7 @@ int main()
 	double* vO = new double[N_grids];
 	double dT = 0;
 	double vJ_total = 0;
+	double vM_total = 0;
 	vM_dot[N_grids - 1] = M_dot_boundary;
 	vM_dot[N_grids - 2] = M_dot_boundary;
 
@@ -179,14 +181,15 @@ int main()
 		vM_dot[i] = 0;
 	});
 
-	parallel_for(0, N_grids, [=, &vJ_total](int i)
+	parallel_for(0, N_grids, [=, &vJ_total, &vM_total](int i)
 	{  
 		vR[i] = vX[i]*vX[i];
 		vE[i] = E_0 * exp(-1 * (pow((vR[i] - Mu), 2.)) / (2. * pow(Sigma, 2.)));
 		vS[i] = vX[i]*vE[i];
-		vV[i] = VISC_C(0, 0, vR[i]) * pow(vX[i], (4. / 3.)) * pow(vS[i], (2. / 3.));
-		vJ_total += 4 * PI * sqrt(G * M_compact) * vX[i] * vS[i] * delta_X;
 		vO[i] = thompson / m_p;
+		vV[i] = VISC_C(0, 0, vR[i], vO[i]) * pow(vX[i], (4. / 3.)) * pow(vS[i], (2. / 3.));
+		vJ_total += 4 * PI * sqrt(G * M_compact) * vX[i] * vS[i] * delta_X;
+		vM_total += 4 * PI * vS[i] * vX[i] * vX[i] * delta_X;
 		vT_irr[i] = 0;
 		vH[i] = 0;
 		vdelta_T[i] = 0;
@@ -205,7 +208,7 @@ int main()
 			
 		else
 			vT_c[i] = 0;
-		vH[i] = sqrt((vT_c[i] * k * pow(vR[i], 3)) / (mu_p(vT_eff[i]) * m_p * G * M_compact));
+		vH[i] = sqrt((vT_c[i] * k * pow(vR[i], 3)) / (mu_p(vT_c[i]) * m_p * G * M_compact));
 		// Find Opacity value*****************************************************
 		//************************************************************************
 		int a = 0, b = 0;
@@ -273,6 +276,7 @@ int main()
 	auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 	cout << "Initial conditions created in " <<	elapsed.count() << " ms.\n";
 	cout << "Total angular momentum is " << vJ_total << " g cm2 s-1.\n";
+	cout << "Total mass is " << vM_total << " g.\n";
 	//********************************************************************
 	//********************************************************************
 
@@ -290,12 +294,12 @@ int main()
 	{
 		vT_sample[i - 1] = exp(i*deltaT_sample);
 	}
-	int N_L_sample = 500;
+	int N_L_sample = 10000;
 	double* vLT_sample = new double[N_L_sample];
 	double deltaLT_sample = log(T_max) / (double)N_L_sample;
 	for (int i = 1; i <= N_L_sample; i++)
 	{
-		vLT_sample[i - 1] = exp(i*deltaLT_sample);
+		vLT_sample[i - 1] = i*(T_max/N_L_sample);
 	}
 	int j = 0;
 	int l = 0;
@@ -333,7 +337,7 @@ int main()
 		// Determine outer boundary condition*************************************************************
 		//************************************************************************************************
 		vS[N_grids - 1] = pow(((vM_dot[N_grids - 2] * delta_X / (3. * PI) + vS[N_grids - 2] * vV[N_grids - 2]) 
-			/ (VISC_C(vT_c[N_grids - 1], vT_irr[N_grids - 1], vR[N_grids - 1]) * pow(vX[N_grids - 1], (4. / 3.)))),
+			/ (VISC_C(vT_c[N_grids - 1], vT_irr[N_grids - 1], vR[N_grids - 1], vO[N_grids - 1]) * pow(vX[N_grids - 1], (4. / 3.)))),
 			(3. / 5.));
 		//************************************************************************************************
 		//************************************************************************************************
@@ -352,22 +356,22 @@ int main()
 
 		// Iterate in radial coordinate ******************************************************************
 		//************************************************************************************************
-		parallel_for(0, N_grids - 2, [=](int i)
+		parallel_for(1, N_grids - 1, [=](int i)
 		{
-			
-			vS_new[i + 1] = vS[i + 1] + 0.75 * dT / pow((vX[i + 1] * delta_X), 2) *
-				(vV[i + 2] * vS[i + 2] + vV[i] * vS[i] - 2. * vV[i + 1] * vS[i + 1]);
-			vV_new[i + 1] = VISC_C(vT_c[i + 1], vT_irr[i + 1], vR[i + 1]) * pow(vX[i + 1], (4./3.)) * pow(vS_new[i + 1], (2. / 3.));
+
+			vS_new[i] = vS[i] + 0.75 * dT / pow((vX[i] * delta_X), 2) *
+				(vV[i + 1] * vS[i + 1] + vV[i - 1] * vS[i - 1] - 2. * vV[i] * vS[i]);
+			vV_new[i] = VISC_C(vT_c[i], vT_irr[i], vR[i], vO[i]) * pow(vX[i], (4. / 3.)) * pow(vS_new[i], (2. / 3.));
 		});
 		//*************************************************************************************************
 		//*************************************************************************************************
 
 		// Obtain new values*******************************************************************************
 		//*************************************************************************************************
-		parallel_for(0, N_grids - 2, [=](int i)
+		parallel_for(1, N_grids - 1, [=](int i)
 		{
-			vS[i + 1] = vS_new[i + 1];
-			vV[i + 1] = vV_new[i + 1];
+			vS[i] = vS_new[i];
+			vV[i] = vV_new[i];
 		});
 		//*************************************************************************************************
 		//*************************************************************************************************
@@ -383,7 +387,7 @@ int main()
 		{
 			vT_eff[i + 1] = pow(3 * G * M_compact * abs(vM_dot[i + 1]) / (8 * PI * a * pow(vX[i + 1], 6)) * (1 - sqrt(X_isco / pow(vX[i + 1], 2))), 0.25);
 			vT_c[i + 1] = pow(3 * OpticalThickness(vE[i + 1]) * pow(vT_eff[i + 1], 4) / 4, 0.25);
-			vH[i + 1] = sqrt((vT_c[i + 1] * k * pow(vR[i + 1], 3)) / (mu_p(vT_eff[i + 1]) * m_p * G * M_compact));
+			vH[i + 1] = sqrt((vT_c[i + 1] * k * pow(vR[i + 1], 3)) / (mu_p(vT_c[i + 1]) * m_p * G * M_compact));
 
 
 			// Find Opacity value*****************************************************
@@ -431,17 +435,17 @@ int main()
 				cout << "Corona has formed at time T = " << T/day << " days.\n" << elapsed.count() << " ms have elapsed.\n";
 				message = false;
 			}
-			IrradiationTemperature(vT_irr, N_grids, 10, 0.9, L_instant, vR, vH); // Dubus et. al. (2014)
+			IrradiationTemperature(vT_irr, N_grids, 1, 0.9, L_instant, vR, vH); // Dubus et. al. (2014)
 		}
 		else
 		{
-			IrradiationTemperature(vT_irr, N_grids, 0.1, 0.9, L_instant, vR, vH); // Dubus et. al. (2014)
+			IrradiationTemperature(vT_irr, N_grids, 0, 0.9, L_instant, vR, vH); // Dubus et. al. (2014)
 		}
-		parallel_for(0, N_grids - 2, [=](int i)
+		parallel_for(1, N_grids - 1, [=](int i)
 		{
-			vT_c[i + 1] = pow(3 * vE[i + 1] * vO[i + 1] * (pow(vT_eff[i + 1], 4)) / 8 + pow(vT_irr[i + 1], 4), 0.25); // Dubus et. al. (2014)
-			vH[i + 1] = sqrt((vT_c[i + 1] * k * pow(vR[i + 1], 3)) / (mu_p(vT_eff[i + 1]) * m_p * G * M_compact));
-			vV[i + 1] = alpha_alternative(vT_c[i + 1], vT_irr[i + 1], vR[i + 1]) * sqrt((vT_c[i + 1] * k) / (mu_p(vT_eff[i + 1]) * m_p)) * vH[i + 1]; //
+			vT_c[i] = pow(3 * vE[i] * vO[i] * (pow(vT_eff[i], 4)) / 8 + pow(vT_irr[i], 4), 0.25); // Dubus et. al. (2014)
+			vH[i] = sqrt((vT_c[i] * k * pow(vR[i], 3)) / (mu_p(vT_c[i]) * m_p * G * M_compact));
+			vV[i] = alpha_alternative(vT_c[i], vT_irr[i], vR[i]) * sqrt((vT_c[i] * k) / (mu_p(vT_c[i]) * m_p)) * vH[i]; //
 		});
 		T += dT; // Increase time
 
@@ -461,7 +465,7 @@ int main()
 				}
 				l++;
 				file.open("lightcurve.txt", ios::app);
-				if (L_instant > 0)
+				if (L_instant > 1e30)
 					file << T / day << "\t" << L_instant << "\n";						// Write luminosity to file
 				file.close();
 				parallel_for(0, N_grids, [=](int i)
@@ -470,19 +474,19 @@ int main()
 				});
 				L_BB = BB_Luminosity(vT_sur, vX);
 				file_bolo.open("lightcurve_bolo.txt", ios::app);
-				if (L_BB > 1e20)
+				if (L_BB > 1e30)
 					file_bolo << T / day << "\t" << L_BB << "\n";						// Write luminosity to file
 				file_bolo.close();
 
 				L_optical = GetLuminosity(vT_sur, vX, delta_X, N_grids, 1, 4, 0.01);
 				file_optical.open("lightcurve_optical.txt", ios::app);
-				if (L_optical > 1e20)
+				if (L_optical > 1e30)
 					file_optical << T / day << "\t" << L_optical << "\n";						// Write luminosity to file
 				file_optical.close();
 
-				L_X = GetLuminosity(vT_sur, vX, delta_X, N_grids, 1000, 10000, 1);
+				L_X = GetLuminosity(vT_sur, vX, delta_X, N_grids, 100, 10000, 1);
 				file_X.open("lightcurve_X.txt", ios::app);
-				if (L_X > 1e20)
+				if (L_X > 1e30)
 					file_X << T / day << "\t" << L_X << "\n";						// Write luminosity to file
 				file_X.close();
 			}
@@ -508,6 +512,16 @@ int main()
 			end = std::chrono::high_resolution_clock::now();
 			elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 			cout << "Current time step is " << dT << " s.\n";
+			cout << std::scientific;
+			vJ_total = 0;
+			vM_total = 0;
+			parallel_for(0, N_grids, [=, &vJ_total, &vM_total](int i)
+			{
+				vJ_total += 4 * PI * sqrt(G * M_compact) * vX[i] * vS[i] * delta_X;
+				vM_total += 4 * PI * vS[i] * vX[i] * vX[i] * delta_X;
+			});
+			cout << "Total angular momentum is " << vJ_total << " g cm2 s-1.\n";
+			cout << "Total mass is " << vM_total << " g.\n";
 			cout << T/T_max * 100 << fixed << " percent completed! " << elapsed.count() << " ms have elapsed.\n";
 		}
 		//*************************************************************************************************
@@ -622,7 +636,7 @@ void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilo
 			if (atan((H[i + 1] - 1e6) / R[i + 1]) < atan((H[j] - 1e6) / R[j]))
 			{
 				n++;
-				if (n > 10)
+				if (n > 5)
 				{
 					T_irr[i + 1] = 0;
 					shadow = true;
@@ -632,7 +646,7 @@ void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilo
 		if (!shadow)
 		{
 			//double C = nu * (1 - epsilon)*((H[i + 1] - H[i]) / (R[i + 1] - R[i]) - H[i + 1] / R[i + 1]);
-			double C = /*5e-3;*/ nu * (1 - epsilon)*(2. / 35.)*(H[i + 1] / R[i + 1]); // lasota (2014)
+			double C = /*5e-3;*/ nu * (1 - epsilon)*(2. / 35.)*(H[i + 1] / R[i + 1]); // lasota (2014)*/
 			if (C > 0 && L > 0)
 				T_irr[i + 1] = pow(C * L / (4 * PI * a * R[i + 1] * R[i + 1]), 0.25);
 			else
@@ -672,11 +686,11 @@ double mu_p(double T)
 	else return mu_p_cold;
 }
 
-double VISC_C(double T_c, double T_irr, double R)
+double VISC_C(double T_c, double T_irr, double R, double opacity)
 {
 	double VIS_C = pow(
-		(27. / 32.) * (pow(alpha_alternative(T_c, T_irr, R), 4) * pow(k, 4) * thompson)
-		/ (pow(mu_p(T_c), 4) * pow(m_p, 5) * a * G * M_compact)
+		(27. / 32.) * (pow(alpha_alternative(T_c, T_irr, R), 4) * pow(k, 4) * opacity)
+		/ (pow(mu_p(T_c), 4) * pow(m_p, 4) * a * G * M_compact)
 		, (1. / 3.));
 	return VIS_C;
 }
@@ -695,7 +709,23 @@ double average(double numbers[], int size) {
  */
 double alpha_alternative(double T_c, double T_irr, double R)
 {
-	//return exp(log(alpha_cold) + (log(alpha_hot) - log(alpha_cold)) * pow(1 + pow(T_critical(T_irr, R) / T_c, 8), -1));
+	double v1 = T_c_max(T_irr, R);
+	double v2 = T_c_min(T_irr, R);
+	double v3 = irr_effect(T_irr);
+	double v4 = pow(R / 1e10, -0.05 * irr_effect(T_irr));
+	double v5 = pow(R / 1e10, 0.05 - 0.12 * irr_effect(T_irr));
+	double v6 = -0.05 * irr_effect(T_irr);
+	double v7 = 0.05 - 0.12 * irr_effect(T_irr);
+	double criticaltemp = T_critical(T_irr, R);
+	double power = pow(1 + pow(criticaltemp / T_c, 8), -1);
+	double calc = alpha_cold * pow((alpha_hot / alpha_cold), power);
+	if(calc > 0)
+		return calc;
+	else
+	{
+		//cout << "alpha = " << std::scientific << calc;
+		return alpha_hot;
+	}
 	if (T_c_max(T_irr, R) > T_c_min(T_irr, R))
 	{
 		return alpha_hot;
@@ -705,6 +735,8 @@ double alpha_alternative(double T_c, double T_irr, double R)
 }
 double T_critical(double T_irr, double R)
 {
+	if (T_c_max(T_irr, R) == std::numeric_limits<double>::infinity())
+		return 0;
 	return 0.5 * (T_c_max(T_irr, R) + T_c_min(T_irr, R));
 }
 double T_c_max(double T_irr, double R)
