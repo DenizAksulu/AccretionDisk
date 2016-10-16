@@ -61,24 +61,27 @@ static double opacity[19][70];
 static double logR[19] = { -8, -7.5, -7, -6.5, -6, -5.5, -5, -4.5, -4, -3.5, -3, -2.5, -2, -1.5, -1, -0.5, 0, 0.5, 1 };
 static double logT[70];
 
-double OpticalThickness(double SurfaceDensity);
+double OpticalThickness(double SurfaceDensity, double opacity);
 double NormalizationGaussian(double Mu, double Sigma, double R_isco, double R_outer, double M_disk);
 void WriteGraphData(double* X, double* Y, int length, string filename, bool append);
 double eVtoHz(double eV);
 void ExtractSpectrum(double* T, double* X, double delta_X, int N_grids, double minEnergyEV, double maxEnergyEV, double resolutionEV, bool append);
-void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilon, double L, double* R, double* H);
+void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilon, double L, double* R, double* H, double offset);
 double* IrradiationTemperaturePower_4(int N_grids, double nu, double epsilon, double L, double* R, double* H);
 double alpha(double T);									// alpha parameter for disk
 double mu_p(double T);									// 
-double VISC_C(double T_c, double T_irr, double R, double opacity);
+double VISC_C(double alpha, double T_c, double opacity);
 double average(double numbers[], int size); 
 double alpha_alternative(double T_c, double T_irr, double R);
+double alpha_alternative(double* vAlpha, double* T_c, double* T_irr, double* R);
+double alpha_alternative_smooth(double* vAlpha, double* T_c, double* T_irr, double* R);
 double T_critical(double T_irr, double R);
 double T_c_max(double T_irr, double R);
 double T_c_min(double T_irr, double R);
 double irr_effect(double T_irr);
 double BB_Luminosity(double* T_eff, double* X);
 double GetLuminosity(double* T, double* X, double delta_X, int N_grids, double minEnergyEV, double maxEnergyEV, double resolutionEV);
+int FindHotIndex(double* vAlpha);
 
 int main()
 {
@@ -134,6 +137,7 @@ int main()
 	double* vdelta_T = new double[N_grids];			// Surface mass density vector
 	double* vH = new double[N_grids];
 	double* vO = new double[N_grids];
+	double* vAlpha = new double[N_grids];
 	double dT = 0;
 	double vJ_total = 0;
 	double vM_total = 0;
@@ -187,7 +191,8 @@ int main()
 		vE[i] = E_0 * exp(-1 * (pow((vR[i] - Mu), 2.)) / (2. * pow(Sigma, 2.)));
 		vS[i] = vX[i]*vE[i];
 		vO[i] = thompson / m_p;
-		vV[i] = VISC_C(0, 0, vR[i], vO[i]) * pow(vX[i], (4. / 3.)) * pow(vS[i], (2. / 3.));
+		vAlpha[i] = 0.033;
+		vV[i] = VISC_C(0.033, 0, vO[i]) * pow(vX[i], (4. / 3.)) * pow(vS[i], (2. / 3.));
 		vJ_total += 4 * PI * sqrt(G * M_compact) * vX[i] * vS[i] * delta_X;
 		vM_total += 4 * PI * vS[i] * vX[i] * vX[i] * delta_X;
 		vT_irr[i] = 0;
@@ -204,7 +209,7 @@ int main()
 		else
 			vT_eff[i] = 0;
 		if (vM_dot[i] >= 0)
-			vT_c[i] = pow(3 * OpticalThickness(vE[i]) * pow(vT_eff[i], 4) / 4, 0.25);
+			vT_c[i] = pow(3 * OpticalThickness(vE[i], vO[i]) * pow(vT_eff[i], 4) / 4, 0.25);
 			
 		else
 			vT_c[i] = 0;
@@ -258,6 +263,9 @@ int main()
 
 	ExtractSpectrum(vT_eff, vX, delta_X, N_grids - 2, 1, 15000, 1, false);
 
+	alpha_alternative(vAlpha, vT_c, vT_irr, vR);
+
+	WriteGraphData(vR, vAlpha, N_grids, "AvsR.txt", false);
 	WriteGraphData(vR, vT_irr, N_grids - 1, "TirrvsR.txt", false);
 	WriteGraphData(vR, vE, N_grids, "EvsR.txt", false);
 	WriteGraphData(vR, vV, N_grids, "VvsR.txt", false);
@@ -326,16 +334,25 @@ int main()
 	if (L_X > 1e20)
 		file_X << T << "\t" << L_X << "\n";						// Write luminosity to file
 	file_X.close();
+	
+	ofstream file_R_hot;
+	file_R_hot.open("Rhot_T.txt", ios::out);
+	file_R_hot << T << "\t" << vR[FindHotIndex(vAlpha)] << "\n";
+	file_R_hot.close();
 
 	L_previous = 0.1;
 	T = 0;
 	bool message = true;
 	while (T < T_max)
 	{
+		// Calculate alpha values*******************
+		alpha_alternative(vAlpha, vT_c, vT_irr, vR);
+		//******************************************
+
 		// Determine outer boundary condition*************************************************************
 		//************************************************************************************************
 		vS[N_grids - 1] = pow(((vM_dot[N_grids - 2] * delta_X / (3. * PI) + vS[N_grids - 2] * vV[N_grids - 2]) 
-			/ (VISC_C(vT_c[N_grids - 1], vT_irr[N_grids - 1], vR[N_grids - 1], vO[N_grids - 1]) * pow(vX[N_grids - 1], (4. / 3.)))),
+			/ (VISC_C(vAlpha[N_grids - 1], vT_c[N_grids - 1], vO[N_grids - 1]) * pow(vX[N_grids - 1], (4. / 3.)))),
 			(3. / 5.));
 		//************************************************************************************************
 		//************************************************************************************************
@@ -359,7 +376,7 @@ int main()
 
 			vS_new[i] = vS[i] + 0.75 * dT / pow((vX[i] * delta_X), 2) *
 				(vV[i + 1] * vS[i + 1] + vV[i - 1] * vS[i - 1] - 2. * vV[i] * vS[i]);
-			vV_new[i] = VISC_C(vT_c[i], vT_irr[i], vR[i], vO[i]) * pow(vX[i], (4. / 3.)) * pow(vS_new[i], (2. / 3.));
+			vV_new[i] = VISC_C(vAlpha[i], vT_c[i], vO[i]) * pow(vX[i], (4. / 3.)) * pow(vS_new[i], (2. / 3.));
 		});
 		//*************************************************************************************************
 		//*************************************************************************************************
@@ -384,7 +401,7 @@ int main()
 		parallel_for(0, N_grids - 2, [=](int i)
 		{
 			vT_eff[i + 1] = pow(3 * G * M_compact * abs(vM_dot[i + 1]) / (8 * PI * a * pow(vX[i + 1], 6)) * (1 - sqrt(X_isco / pow(vX[i + 1], 2))), 0.25);
-			vT_c[i + 1] = pow(3 * OpticalThickness(vE[i + 1]) * pow(vT_eff[i + 1], 4) / 4, 0.25);
+			vT_c[i + 1] = pow(3 * OpticalThickness(vE[i + 1], vO[i + 1]) * pow(vT_eff[i + 1], 4) / 4, 0.25);
 			vH[i + 1] = sqrt((vT_c[i + 1] * k * pow(vR[i + 1], 3)) / (mu_p(vT_c[i + 1]) * m_p * G * M_compact));
 
 
@@ -418,12 +435,13 @@ int main()
 					break;
 				}
 			}
+			
 			vO[i + 1] = pow(10, opacity[a][b]);
 			//************************************************************************
 			//************************************************************************
 		});
 
-		L_instant = (vM_dot[0] * G * M_compact) / (2 * R_isco);		// Luminosity in ergs/s
+		L_instant = 0.1 * vM_dot[0] * c * c; //(vM_dot[0] * G * M_compact) / (2 * R_isco);		// Luminosity in ergs/s
 
 		
 		if (T > T_L + T_corona)
@@ -433,18 +451,38 @@ int main()
 				cout << "Corona has formed at time T = " << T/day << " days.\n" << elapsed.count() << " ms have elapsed.\n";
 				message = false;
 			}
-			IrradiationTemperature(vT_irr, N_grids, 1, 0.9, L_instant, vR, vH); // Dubus et. al. (2014)
+			IrradiationTemperature(vT_irr, N_grids, 0.1, 0.9, L_instant, vR, vH, 0); // Dubus et. al. (2014)
+			/*parallel_for(1, N_grids - 1, [=](int i)
+			{
+				vT_c[i] = pow(3 * vE[i] * vO[i] * (pow(vT_eff[i], 4)) / 8 + pow(vT_irr[i], 4), 0.25); // Dubus et. al. (2014)
+			});
+			// Calculate alpha values*******************
+			alpha_alternative(vAlpha, vT_c, vT_irr, vR);
+			//******************************************
+			parallel_for(1, N_grids - 1, [=](int i)
+			{
+				vH[i] = sqrt((vT_c[i] * k * pow(vR[i], 3)) / (mu_p(vT_c[i]) * m_p * G * M_compact));
+				vV[i] = vAlpha[i] * sqrt((vT_c[i] * k) / (mu_p(vT_c[i]) * m_p)) * vH[i]; //
+			});*/
 		}
 		else
 		{
-			IrradiationTemperature(vT_irr, N_grids, 0, 0.9, L_instant, vR, vH); // Dubus et. al. (2014)
+			IrradiationTemperature(vT_irr, N_grids, 0.1, 0.9, L_instant, vR, vH, 0); // Dubus et. al. (2014)
+			/*IrradiationTemperature(vT_irr, N_grids, 0.1, 0.9, L_instant, vR, vH, 0); // Dubus et. al. (2014)
+			parallel_for(1, N_grids - 1, [=](int i)
+			{
+				vT_c[i] = pow(3 * vE[i] * vO[i] * (pow(vT_eff[i], 4)) / 8 + pow(vT_irr[i], 4), 0.25); // Dubus et. al. (2014)
+			});
+			// Calculate alpha values*******************
+			alpha_alternative(vAlpha, vT_c, vT_irr, vR);
+			//******************************************
+			parallel_for(1, N_grids - 1, [=](int i)
+			{
+				vH[i] = sqrt((vT_c[i] * k * pow(vR[i], 3)) / (mu_p(vT_c[i]) * m_p * G * M_compact));
+				vV[i] = vAlpha[i] * sqrt((vT_c[i] * k) / (mu_p(vT_c[i]) * m_p)) * vH[i]; //
+			});*/
 		}
-		parallel_for(1, N_grids - 1, [=](int i)
-		{
-			vT_c[i] = pow(3 * vE[i] * vO[i] * (pow(vT_eff[i], 4)) / 8 + pow(vT_irr[i], 4), 0.25); // Dubus et. al. (2014)
-			vH[i] = sqrt((vT_c[i] * k * pow(vR[i], 3)) / (mu_p(vT_c[i]) * m_p * G * M_compact));
-			vV[i] = alpha_alternative(vT_c[i], vT_irr[i], vR[i]) * sqrt((vT_c[i] * k) / (mu_p(vT_c[i]) * m_p)) * vH[i]; //
-		});
+		
 		T += dT; // Increase time
 
 		if (l < N_L_sample)
@@ -487,6 +525,10 @@ int main()
 				if (L_X > 1e30)
 					file_X << T / day << "\t" << L_X << "\n";						// Write luminosity to file
 				file_X.close();
+
+				file_R_hot.open("Rhot_T.txt", ios::app);
+				file_R_hot << T / day << "\t" << vR[FindHotIndex(vAlpha)] << "\n";
+				file_R_hot.close();
 			}
 		}
 		// Take samples ***********************************************************************************
@@ -497,6 +539,7 @@ int main()
 
 			ExtractSpectrum(vT_eff, vX, delta_X, N_grids - 2, 1, 15000, 1, true);
 
+			WriteGraphData(vR, vAlpha, N_grids, "AvsR.txt", true);
 			WriteGraphData(vR, vE, N_grids, "EvsR.txt", true);
 			WriteGraphData(vR, vV, N_grids, "VvsR.txt", true);
 			WriteGraphData(vR, vM_dot, N_grids- 1, "MdotvsR.txt", true);
@@ -520,7 +563,8 @@ int main()
 			});
 			cout << "Total angular momentum is " << vJ_total << " g cm2 s-1.\n";
 			cout << "Total mass is " << vM_total << " g.\n";
-			cout << T/T_max * 100 << fixed << " percent completed! " << elapsed.count() << " ms have elapsed.\n";
+			cout << "Hot disk radius is " << vR[FindHotIndex(vAlpha)] << " cm.\n";
+			cout << T/T_max * 100 << fixed << " percent completed! " << elapsed.count() << " ms have elapsed.\n\n";
 		}
 		//*************************************************************************************************
 		//*************************************************************************************************
@@ -555,10 +599,9 @@ void WriteGraphData(double* X, double* Y, int length, string filename, bool appe
 	fclose(file);
 }
 
-double OpticalThickness(double SurfaceDensity)
+double OpticalThickness(double SurfaceDensity, double opacity)
 {
-	double Opacity = thompson / m_p;
-	return SurfaceDensity * Opacity;
+	return SurfaceDensity * opacity;
 }
 
 double BB_Luminosity(double* T_eff, double* X)
@@ -622,7 +665,7 @@ double GetLuminosity(double* T, double* X, double delta_X, int N_grids, double m
 	return L;
 }
 // Point source assumed
-void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilon, double L, double* R, double* H)
+void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilon, double L, double* R, double* H, double offset)
 {
 	bool shadow = false;
 	parallel_for(0, N_grids - 1, [=, &shadow](int i)
@@ -631,10 +674,10 @@ void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilo
 		shadow = false;
 		parallel_for(0, i + 1, [=, &shadow, &n](int j)
 		{
-			if (atan((H[i + 1] - 1e6) / R[i + 1]) < atan((H[j] - 1e6) / R[j]))
+			if (atan((H[i + 1] - offset) / R[i + 1]) < atan((H[j] - offset) / R[j]))
 			{
 				n++;
-				if (n > 5)
+				if (n > 150)
 				{
 					T_irr[i + 1] = 0;
 					shadow = true;
@@ -683,11 +726,22 @@ double mu_p(double T)
 		return mu_p_hot;
 	else return mu_p_cold;
 }
-
-double VISC_C(double T_c, double T_irr, double R, double opacity)
+int FindHotIndex(double* vAlpha)
+{
+	int i;
+	for (i = 0; i < N_grids - 1; i++)
+	{
+		if (vAlpha[i] == alpha_cold && vAlpha[i + 1] == alpha_cold)
+		{
+			return i;
+		}
+	}
+	return N_grids - 1;
+}
+double VISC_C(double alpha, double T_c, double opacity)
 {
 	double VIS_C = pow(
-		(27. / 32.) * (pow(alpha_alternative(T_c, T_irr, R), 4) * pow(k, 4) * opacity)
+		(27. / 32.) * (pow(alpha, 4) * pow(k, 4) * opacity)
 		/ (pow(mu_p(T_c), 4) * pow(m_p, 4) * a * G * M_compact)
 		, (1. / 3.));
 	return VIS_C;
@@ -730,6 +784,51 @@ double alpha_alternative(double T_c, double T_irr, double R)
 	}
 	else
 		return alpha_cold;
+}
+
+double alpha_alternative(double* vAlpha, double* T_c, double* T_irr, double* R)
+{
+	parallel_for(0, N_grids, [=](int i)
+	{
+		double criticaltemp = T_critical(T_irr[i], R[i]);
+		double power = pow(1 + pow(criticaltemp / T_c[i], 8), -1);
+		double calc = alpha_cold * pow((alpha_hot / alpha_cold), power);
+		if (calc > 0)
+			vAlpha[i] = calc;
+		else
+		{
+			//cout << "alpha = " << std::scientific << calc;
+			vAlpha[i] = alpha_hot;
+		}
+	});
+}
+
+double alpha_alternative_smooth(double* vAlpha, double* T_c, double* T_irr, double* R)
+{
+	parallel_for(0, N_grids, [=](int i)
+	{
+		double criticaltemp = T_critical(T_irr[i], R[i]);
+		double power = pow(1 + pow(criticaltemp / T_c[i], 8), -1);
+		double calc = alpha_cold * pow((alpha_hot / alpha_cold), power);
+		if (calc > 0)
+			vAlpha[i] = calc;
+		else
+		{
+			vAlpha[i] = alpha_hot;
+		}
+	});
+
+	int j = FindHotIndex(vAlpha);
+
+	parallel_for(0, N_grids, [=](int i)
+	{
+		if (i < j)
+		{
+			vAlpha[i] = alpha_hot;
+		}
+		else
+			vAlpha[i] = alpha_cold;
+	});
 }
 double T_critical(double T_irr, double R)
 {
