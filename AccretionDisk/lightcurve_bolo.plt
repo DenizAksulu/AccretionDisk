@@ -14,4 +14,4 @@ datafile = 'lightcurve.txt'
 set logscale y
 unset logscale x
 
-plot "lightcurve_optical.txt" with lines, "lightcurve_X.txt" with lines
+plot[:][1e30:] "lightcurve_bolo.txt" with lines, "lightcurve_optical.txt" with lines, "lightcurve_X.txt" with lines

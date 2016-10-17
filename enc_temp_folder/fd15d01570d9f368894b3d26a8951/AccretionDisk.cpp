@@ -461,7 +461,7 @@ int main()
 		{
 			if (message)
 			{
-				cout << "Corona has formed at time T = " << T/day << " days.\n" << elapsed.count() << " ms have elapsed.\n\n";
+				cout << "Corona has formed at time T = " << T/day << " days.\n" << elapsed.count() << " ms have elapsed.\n";
 				message = false;
 			}
 			IrradiationTemperature(vT_irr, N_grids, 0.5, 0.9, L_instant, vR, vH, 1e11, true); // Dubus et. al. (2014)
