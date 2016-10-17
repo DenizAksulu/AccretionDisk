@@ -479,7 +479,8 @@ int main()
 			{
 				if (L_instant < L_previous)
 				{
-					cout << "Maximum luminosity reached -> L = " << L_instant << " erg/s at time T = " << T << " s.\n" << elapsed.count() << " ms have elapsed.\n";
+					cout << std::scientific;
+					cout << "Maximum luminosity reached -> L = " << L_instant << " erg/s at time T = " << T/day << " days.\n" << elapsed.count() << " ms have elapsed.\n\n";
 					T_L = T;
 					L_previous = 0;
 				}
