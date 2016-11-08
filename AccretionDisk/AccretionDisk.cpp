@@ -111,36 +111,49 @@ void CoronaIrradiationTemperature(double* T_irr, double nu, double epsilon, doub
 void CoronaIrradiationTemperature(double* T_irr, double nu, double epsilon, double L, double* R, double* H, double R_corona);
 double TimeDependentCoronaRadius(double T_current, double T_corona, double T_rise, double R_initial, double R_max);
 
-int main()
+int main(int argc, char **argv)
 {
+	double n;
 	double T = 0;
-	cout << "Accretion disk simulation with parallel CPU computing.\n\n";
+	if (argc == 1)
+	{
+		cout << "Accretion disk simulation with parallel CPU computing.\n\n";
+		cout << "Please enter the mass of the compact object. (M_solar)\n";
+		cin >> n;
+		M_compact = n * M_solar;
+		cout << "Please enter the mass of the disk. (M_solar)\n";
+		cin >> n;
+		M_disk = n * M_solar;
+		cout << "Please enter the accretion rate. (M_solar s-1)\n";
+		cin >> n;
+		M_dot_boundary = n * M_solar;
 
-	cout << "Please enter the mass of the compact object. (M_solar)\n";
-	double n; cin >> n;
-	M_compact = n * M_solar;
-	cout << "Please enter the mass of the disk. (M_solar)\n";
-	cin >> n;
-	M_disk = n * M_solar;
-	cout << "Please enter the accretion rate. (M_solar s-1)\n";
-	cin >> n;
-	M_dot_boundary = n * M_solar;
+		cout << "Please enter the initial radius of the corona. (R_g)\n";
+		cin >> n;
+		R_corona_initial = n * 2 * G * M_compact / pow(c, 2);
 
-	cout << "Please enter the initial radius of the corona. (R_g)\n";
-	cin >> n;
-	R_corona_initial = n * 2 * G * M_compact / pow(c, 2);
+		cout << "Please enter the maximum radius of the corona. (R_g)\n";
+		cin >> n;
+		R_corona_max = n * 2 * G * M_compact / pow(c, 2);
 
-	cout << "Please enter the maximum radius of the corona. (R_g)\n";
-	cin >> n;
-	R_corona_max = n * 2 * G * M_compact / pow(c, 2);
+		cout << "Please enter the maximum efficiency of the corona.\n";
+		cin >> n;
+		nu_corona_max = n;
 
-	cout << "Please enter the maximum efficiency of the corona.\n";
-	cin >> n;
-	nu_corona_max = n;
-
-	cout << "Please enter the rise time of the corona. (days)\n";
-	cin >> n;
-	T_corona_rise = n * day;
+		cout << "Please enter the rise time of the corona. (days)\n";
+		cin >> n;
+		T_corona_rise = n * day;
+	}
+	else
+	{
+		M_compact = stod(argv[1]) * M_solar;
+		M_disk = stod(argv[2]) * M_solar;
+		M_dot_boundary = stod(argv[3]) * M_solar;
+		R_corona_initial = stod(argv[4]) * 2 * G * M_compact / pow(c, 2);
+		R_corona_max = stod(argv[5]) * 2 * G * M_compact / pow(c, 2);
+		nu_corona_max = stod(argv[6]);
+		T_corona_rise = stod(argv[7]) * day;
+	}
 
 	// Calculate some initial values
 	R_isco = 6 * G * M_compact / pow(c, 2);
@@ -156,8 +169,15 @@ int main()
 	cout << "Outer radius               = " << R_outer << " cm.\n";
 	cout << "Accretion rate             = " << M_dot_boundary << " g s-1.\n";
 	cout << "Eddington Luminosity       = " << L_edd << " erg s-1.\n";
-	cout << "Please enter the number of grids for the radial coordinate.\n";
-	cin >> N_grids;
+	if (argc == 1)
+	{
+		cout << "Please enter the number of grids for the radial coordinate.\n";
+		cin >> N_grids;
+	}
+	else
+	{
+		N_grids = stod(argv[8]);
+	}
 	cout << "Creating initial conditions...\n";
 	// Calculate steps in X space
 	delta_X = (X_outer - X_isco) / N_grids;
@@ -344,12 +364,19 @@ int main()
 	cout << "Total mass is " << vM_total << " g.\n";
 	//********************************************************************
 	//********************************************************************
+	if (argc == 1)
+	{
+		cout << "Please enter the evolution duration. (months)\n";
+		cin >> n; T_max = n*month;
 
-	cout << "Please enter the evolution duration. (months)\n";
-	cin >> n; T_max = n*month;
-
-	cout << "How many graphs are needed?\n";
-	cin >> N_sample;
+		cout << "How many graphs are needed?\n";
+		cin >> N_sample;
+	}
+	else
+	{
+		T_max = stod(argv[9])*month;
+		N_sample = stod(argv[10]);
+	}
 
 	double* vT_sample = new double[N_sample];
 	double deltaT_sample = log(T_max) / (double)N_sample;
@@ -707,8 +734,11 @@ int main()
 		//*************************************************************************************************
 	}
 	cout << "All done!";
-	cin.get();
-	cin.get();
+	if (argc == 1)
+	{
+		cin.get();
+		cin.get();
+	}
 	return 0;
 }
 
@@ -1211,5 +1241,7 @@ double TimeDependentCoronaRadius(double T_current, double T_corona, double T_ris
 
 	return c_1 * pow(T_current, 2) + c_2 * T_current + c_3;
 }
+
+
 
 
