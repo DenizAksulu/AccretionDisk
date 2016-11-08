@@ -49,7 +49,7 @@ static double mu_p_hot = 0.63;								// proton ratio (ertan, 2002)
 static double mu_p_cold = 0.87;								// proton ratio
 static double T_max;
 static double T_L = 99999999999;
-static double T_corona;
+static double T_corona = 0;
 static double L_instant = 0;
 static double L_BB = 0;
 static double L_optical = 0;
@@ -65,6 +65,12 @@ static double L_edd = 0;
 static double M_dot_edd = 0;
 static double R_point_source = 0;
 static double Theta_point_source = 0;
+
+static double R_corona_max = 0;
+static double R_corona_initial = 0;
+static double T_corona_rise = 0;
+bool CoronaFormed = false;
+
 
 
 double OpticalThickness(double SurfaceDensity, double opacity);
@@ -102,6 +108,8 @@ int FindTruncationIndex(double* E, double* H, double* T_c, double* Alpha);
 void GetShadows(int* Shadows, double* R, double* H, double R_corona, double Theta_corona);
 void CoronaIrradiationTemperature(double* T_irr, double nu, double epsilon, double L, double* R, double* H, double R_corona, double Theta_corona);
 void CoronaIrradiationTemperature(double* T_irr, double nu, double epsilon, double L, double* R, double* H, double R_corona);
+double TimeDependentCoronaRadius(double T_current, double T_corona, double T_rise, double R_initial, double R_max);
+
 int main()
 {
 	double T = 0;
@@ -116,12 +124,18 @@ int main()
 	cout << "Please enter the accretion rate. (M_solar s-1)\n";
 	cin >> n;
 	M_dot_boundary = n * M_solar;
-	cout << "Please enter the radial coordinate of the point source. (R_g)\n";
+
+	cout << "Please enter the initial radius of the corona. (R_g)\n";
 	cin >> n;
-	R_point_source = n * 2 * G * M_compact / pow(c, 2);
-	cout << "Please enter the elevation the point source. (0 degrees - 90 degrees)\n";
+	R_corona_initial = n * 2 * G * M_compact / pow(c, 2);
+
+	cout << "Please enter the maximum radius of the corona. (R_g)\n";
 	cin >> n;
-	Theta_point_source = n * PI / 180;
+	R_corona_max = n * 2 * G * M_compact / pow(c, 2);
+
+	cout << "Please enter the rise time of the corona. (days)\n";
+	cin >> n;
+	T_corona_rise = n * day;
 
 	// Calculate some initial values
 	R_isco = 6 * G * M_compact / pow(c, 2);
@@ -326,14 +340,12 @@ int main()
 	//********************************************************************
 	//********************************************************************
 
-	cout << "Corona formation time after main outburst? (days)\n";
-	cin >> n; T_corona = n*day;
-
 	cout << "Please enter the evolution duration. (months)\n";
 	cin >> n; T_max = n*month;
 
 	cout << "How many graphs are needed?\n";
 	cin >> N_sample;
+
 	double* vT_sample = new double[N_sample];
 	double deltaT_sample = log(T_max) / (double)N_sample;
 	for (int i = 1; i <= N_sample; i++)
@@ -505,19 +517,30 @@ int main()
 
 		L_instant = 0.1 * (vM_dot[0] * G * M_compact) / (2 * R_isco);		// Luminosity in ergs/s
 
-		if (T > 10 * day && L_instant < 0.01 * L_edd)
+		if (T > 10 * day && L_instant < 0.01 * L_edd && !CoronaFormed)
 		{
 			if (message)
 			{
-				cout << "Corona has formed at time T = " << T / day << " days.\n" << elapsed.count() << " ms have elapsed.\n\n";
+				T_corona = T;
+				cout << "Corona has formed at time T = " << T_corona / day << " days.\n" << elapsed.count() << " ms have elapsed.\n\n";
 				message = false;
+				CoronaFormed = true;
 			}
-			nu_irr = 0.5;
-			epsilon_irr = 0.9;
-			r_irr = R_point_source;
-			theta_irr = Theta_point_source;
 		}
-		CoronaIrradiationTemperature(vT_irr, nu_irr, epsilon_irr, L_instant, vR, vH, r_irr); // Dubus et. al. (2014)
+		if (CoronaFormed && T > T_corona + 2 * T_corona_rise)
+		{
+			cout << "Corona has dissolved T = " << T / day << " days.\n" << elapsed.count() << " ms have elapsed.\n\n";
+			CoronaFormed = false;
+		}
+		if (CoronaFormed)
+		{
+			CoronaIrradiationTemperature(vT_irr, TimeDependentCoronaRadius(T, T_corona, T_corona_rise, 1, 20), epsilon_irr, L_instant, vR, vH,
+				TimeDependentCoronaRadius(T, T_corona, T_corona_rise, R_corona_initial, R_corona_max)); // Dubus et. al. (2014)
+		}
+		else
+		{
+			CoronaIrradiationTemperature(vT_irr, 1, epsilon_irr, L_instant, vR, vH, R_corona_initial); // Dubus et. al. (2014)
+		}
 	
 		// Calculate alpha values*******************
 		alpha_compare(vAlpha, vE, vT_irr, vR);
@@ -881,7 +904,7 @@ void CoronaIrradiationTemperature(double* T_irr, double nu, double epsilon, doub
 				if (!Shadow)
 				{
 					//double C = nu * (1 - epsilon)*((H[i + 1] - H[i]) / (R[i + 1] - R[i]) - H[i + 1] / R[i + 1]);
-					double C = 5e-3;/* nu * (1 - epsilon) * (2. / 35.)*(H[i + 1] / R[i + 1]); // lasota (2014)*/
+					double C = nu * 5e-3;/* nu * (1 - epsilon) * (2. / 35.)*(H[i + 1] / R[i + 1]); // lasota (2014)*/
 					double R_2 = pow(H[i + 1], 2) + pow(R[i + 1], 2);
 					double Theta = atan(H[i + 1] / R[i + 1]);
 					double d_2 = pow(R_int[m], 2) + R_2 + 2 * R_int[m] * sqrt(R_2) * cos(Theta_int[n] - Theta);
@@ -1174,3 +1197,14 @@ int FindTruncationIndex(double* E, double* H, double* T_c, double* Alpha)
 	}
 	return 0;
 }
+
+double TimeDependentCoronaRadius(double T_current, double T_corona, double T_rise, double R_initial, double R_max)
+{
+	double c_1 = (R_max - R_initial) / (pow(T_rise, 2) - 4 * T_corona * T_rise);
+	double c_2 = 2 * (T_corona + T_rise) * (R_max - R_initial) / (4 * T_corona * T_rise - pow(T_rise, 2));
+	double c_3 = R_initial - pow(T_corona, 2) * (R_max - R_initial) / (4 * T_corona * T_rise - pow(T_rise, 2));
+
+	return c_1 * pow(T_current, 2) + c_2 * T_current + c_3;
+}
+
+
