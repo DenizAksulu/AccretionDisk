@@ -69,6 +69,7 @@ static double Theta_point_source = 0;
 static double R_corona_max = 0;
 static double R_corona_initial = 0;
 static double T_corona_rise = 0;
+static double nu_corona_max = 0;
 bool CoronaFormed = false;
 
 
@@ -132,6 +133,10 @@ int main()
 	cout << "Please enter the maximum radius of the corona. (R_g)\n";
 	cin >> n;
 	R_corona_max = n * 2 * G * M_compact / pow(c, 2);
+
+	cout << "Please enter the maximum efficiency of the corona.\n";
+	cin >> n;
+	nu_corona_max = n;
 
 	cout << "Please enter the rise time of the corona. (days)\n";
 	cin >> n;
@@ -534,7 +539,7 @@ int main()
 		}
 		if (CoronaFormed)
 		{
-			CoronaIrradiationTemperature(vT_irr, TimeDependentCoronaRadius(T, T_corona, T_corona_rise, 1, 20), epsilon_irr, L_instant, vR, vH,
+			CoronaIrradiationTemperature(vT_irr, TimeDependentCoronaRadius(T, T_corona, T_corona_rise, 1, nu_corona_max), epsilon_irr, L_instant, vR, vH,
 				TimeDependentCoronaRadius(T, T_corona, T_corona_rise, R_corona_initial, R_corona_max)); // Dubus et. al. (2014)
 		}
 		else
