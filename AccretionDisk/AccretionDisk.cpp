@@ -516,55 +516,58 @@ int main(int argc, char **argv)
 		alpha_compare(vAlpha, vE, vT_irr, vR);
 		//******************************************
 
-		parallel_for(0, N_grids, [=](int i)
+
+		for (int j = 0; j < 10; j++) // calculate 10 times
 		{
-			vT_eff[i] = EffectiveTemperature_dubus2014(vE[i], vR[i], vV[i]);
-			vT_c[i] = CentralTemperature_dubus2014(OpticalThickness(vE[i], vO[i]), vT_eff[i], vT_irr[i]);
-		});
-		ScaleHeight_FrankKingRaine(vH, vE, vT_c, vM_dot, vR);
-
-		parallel_for(trunc_radius_index, N_grids, [=](int i)
-		{
-			/*vT_eff[i] = EffectiveTemperature_dubus2014(vE[i], vR[i], vV[i]);
-			vT_c[i] = CentralTemperature_dubus2014(OpticalThickness(vE[i], vO[i]), vT_eff[i], 0);
-			vH[i] = sqrt((vT_c[i] * k * pow(vR[i], 3)) / (mu_p(vT_c[i]) * m_p * G * M_compact));*/
-
-
-			// Find Opacity value*****************************************************
-			//************************************************************************
-			int a = 0, b = 0;
-			for (int m = 0; m < 19; m++)
+			parallel_for(0, N_grids, [=](int i)
 			{
-				if (log10((vE[i] / vH[i]) / pow(vT_c[i] * 1e-6, 3)) >= logR[18])
-				{
-					a = 18;
-					break;
-				}
-				if (log10((vE[i] / vH[i]) / pow(vT_c[i] * 1e-6, 3)) < logR[m])
-				{
-					a = m;
-					break;
-				}
-			}
-
-			for (int n = 0; n < 70; n++)
+				vT_eff[i] = EffectiveTemperature_dubus2014(vE[i], vR[i], vV[i]);
+				vT_c[i] = CentralTemperature_dubus2014(OpticalThickness(vE[i], vO[i]), vT_eff[i], vT_irr[i]);
+			});
+			ScaleHeight_FrankKingRaine(vH, vE, vT_c, vM_dot, vR);
+			parallel_for(trunc_radius_index, N_grids, [=](int i)
 			{
-				if (log10(vT_c[i]) >= logT[69])
-				{
-					b = 69;
-					break;
-				}
-				if (log10(vT_c[i]) < logT[n])
-				{
-					b = n;
-					break;
-				}
-			}
+				/*vT_eff[i] = EffectiveTemperature_dubus2014(vE[i], vR[i], vV[i]);
+				vT_c[i] = CentralTemperature_dubus2014(OpticalThickness(vE[i], vO[i]), vT_eff[i], 0);
+				vH[i] = sqrt((vT_c[i] * k * pow(vR[i], 3)) / (mu_p(vT_c[i]) * m_p * G * M_compact));*/
 
-			vO[i] = pow(10, opacity[a][b]);
-			//************************************************************************
-			//************************************************************************
-		});
+
+				// Find Opacity value*****************************************************
+				//************************************************************************
+				int a = 0, b = 0;
+				for (int m = 0; m < 19; m++)
+				{
+					if (log10((vE[i] / vH[i]) / pow(vT_c[i] * 1e-6, 3)) >= logR[18])
+					{
+						a = 18;
+						break;
+					}
+					if (log10((vE[i] / vH[i]) / pow(vT_c[i] * 1e-6, 3)) < logR[m])
+					{
+						a = m;
+						break;
+					}
+				}
+
+				for (int n = 0; n < 70; n++)
+				{
+					if (log10(vT_c[i]) >= logT[69])
+					{
+						b = 69;
+						break;
+					}
+					if (log10(vT_c[i]) < logT[n])
+					{
+						b = n;
+						break;
+					}
+				}
+
+				vO[i] = pow(10, opacity[a][b]);
+				//************************************************************************
+				//************************************************************************
+			});
+		}
 
 		L_instant = 0.1 * (vM_dot[trunc_radius_index] * G * M_compact) / (2 * R_isco);		// Luminosity in ergs/s
 
@@ -580,13 +583,14 @@ int main(int argc, char **argv)
 		}
 		if (CoronaFormed)
 		{
+			// time independent
 			CoronaIrradiationTemperature(vT_irr, nu_corona_max, epsilon_irr, L_instant, vR, vH, 
-				TimeDependentCoronaRadius(T, T_corona, T_corona_rise, R_isco, R_corona_max, CoronaFormed)); // Dubus et. al. (2014)
+				TimeDependentCoronaRadius(T, T_corona, 10, R_isco, R_corona_max, CoronaFormed)); // Dubus et. al. (2014)
 		}
 		else
 		{
-			CoronaIrradiationTemperature(vT_irr, 1, epsilon_irr, L_instant, vR, vH, R_isco, 0); // Dubus et. al. (2014)
-			//CoronaIrradiationTemperature(vT_irr, 1, epsilon_irr, L_instant, vR, vH, R_isco); // Dubus et. al. (2014)
+			// time independent
+			CoronaIrradiationTemperature(vT_irr, nu_corona_max, epsilon_irr, L_instant, vR, vH, R_isco); // Dubus et. al. (2014)
 		}
 	
 		// Calculate alpha values*******************
@@ -644,6 +648,8 @@ int main(int argc, char **argv)
 				file_R_corona.close();
 			}
 		}
+
+
 		// Take samples ***********************************************************************************
 		//*************************************************************************************************
 		if (T >= vT_sample[j])
@@ -863,55 +869,59 @@ void CoronaIrradiationTemperature(double* T_irr, double nu, double epsilon, doub
 // Integral
 void CoronaIrradiationTemperature(double* T_irr, double nu, double epsilon, double L, double* R, double* H, double R_corona)
 {
-	int N_corona = 10;
-	double* R_int = new double[N_corona];
+	int N_corona = 20;
 	double* Theta_int = new double[N_corona];
-	double Delta_R_corona = R_corona / (N_corona - 1);
 	double Delta_Theta_corona = PI / (2 * (N_corona - 1));
 	parallel_for(0, N_corona, [=](int i)
 	{
-		R_int[i] = 0 + i * Delta_R_corona;
 		Theta_int[i] = 0 + i *  Delta_Theta_corona;
 	});
 	parallel_for(0, N_grids, [=](int i)
 	{
 		T_irr[i] = 0;
 	});
-	double L_per_volume = L / (4 * PI * pow(R_corona, 3) / 3);
 	parallel_for(0, N_grids - 1, [=](int i)
 	{
-		parallel_for(0, N_corona, [=](int m)
+		parallel_for(0, N_corona, [=](int n)
 		{
-			parallel_for(0, N_corona, [=](int n)
+			bool Shadow = false;
+			parallel_for(0, i + 1, [=, &Shadow](int j)
 			{
-				bool Shadow = false;
-				parallel_for(0, i + 1, [=, &Shadow](int j)
+				if (atan((H[i + 1] - R_corona * sin(Theta_int[n])) / (R[i + 1] - R_corona * cos(Theta_int[n])))
+					<
+					atan((H[j] -	 R_corona * sin(Theta_int[n])) / (R[j] -	 R_corona * cos(Theta_int[n]))))
 				{
-					if (atan((H[i + 1] - R_int[m] * sin(Theta_int[n])) / (R[i + 1] - R_int[m] * cos(Theta_int[n]))) 
-						<
-						atan((H[j] -     R_int[m] * sin(Theta_int[n])) / (R[j] -     R_int[m] * cos(Theta_int[n]))))
-					{
-						Shadow = true;
-					}
-				});
-
-				if (!Shadow)
-				{
-					//double C = nu * (1 - epsilon)*((H[i + 1] - H[i]) / (R[i + 1] - R[i]) - H[i + 1] / R[i + 1]);
-					double C = nu * 1e-3;/* nu * (1 - epsilon) * (2. / 35.)*(H[i + 1] / R[i + 1]); // lasota (2014)*/
-					double R_2 = pow(H[i + 1], 2) + pow(R[i + 1], 2);
-					double Theta = atan(H[i + 1] / R[i + 1]);
-					double d_2 = pow(R_int[m], 2) + R_2 + 2 * R_int[m] * sqrt(R_2) * cos(Theta_int[n] - Theta);
-					double L_p = L_per_volume * 2 * PI * R_int[m] * R_int[m] * sin(Theta_int[n]) * Delta_R_corona * Delta_Theta_corona;
-					if (C > 0 && L > 0)
-					{
-							T_irr[i + 1] += pow(C * L_p / (4 * PI * a * d_2)/* * R_int[m] * Delta_R_corona * Delta_Theta_corona*/, 0.25);
-					}
-					else
-						T_irr[i + 1] += 0;
-
+					Shadow = true;
 				}
 			});
+
+			if (!Shadow && R[i + 1] > R_corona)
+			{
+				//double C = nu * (1 - epsilon)*((H[i + 1] - H[i]) / (R[i + 1] - R[i]) - H[i + 1] / R[i + 1]);
+				//double C = nu * 1e-3;/* nu * (1 - epsilon) * (2. / 35.)*(H[i + 1] / R[i + 1]); // lasota (2014)*/
+				
+				double R_2 = pow(H[i + 1], 2) + pow(R[i + 1], 2);	// square of radial coordinate of disk element
+				double Theta = atan(H[i + 1] / R[i + 1]);			// elevation of disk element
+				double d_2 = pow(R_corona, 2) + R_2 + 2 * R_corona * sqrt(R_2) * cos(Theta_int[n] - Theta);	// square of distance between corona element and disk element
+				
+				double L_p = L * sin(Theta_int[n]) * Delta_Theta_corona * 0.5;								// luminosity of corona element
+
+				double beta_prime = acos((d_2 + R_2 - pow(R_corona, 2)) / (2 * sqrt(d_2 * R_2)));			
+				double slope_angle = atan((H[i + 1] - H[i]) / (R[i + 1] / R[i]));
+				double beta = beta_prime + slope_angle - Theta;												// viewing angle of corona
+
+				double L_disk = L_p / (4 * PI * d_2) * sin(beta);
+				if (L > 0)
+				{
+						T_irr[i + 1] += pow(L_disk / a, 0.25);
+				}
+				else
+					T_irr[i + 1] += 0;
+			}
+			else
+			{
+				T_irr[i + 1] += 0;
+			}
 		});
 	});
 }
@@ -1158,7 +1168,7 @@ void ScaleHeight_FrankKingRaine(double * H, double * E, double * T_c, double* M_
 	{
 		parallel_for(0, N_grids, [=](int i)
 		{
-			if (P_gas[i] > P_rad[i])
+			if (P_gas[i]*10 < P_rad[i])
 			{
 				H[i] = ((3 * R_isco) / (4 * 0.1)) * (M_dot[i] / M_dot_edd) * (1 - pow(R_isco / R[i], 0.5));
 			}
