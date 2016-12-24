@@ -40,13 +40,12 @@ static const double PI = 3.14159265358979323846;
 // VARIABLES
 static double M_compact;								// Mass of the compact object
 static double M_disk;									// Mass of the disk
-static double M_dot_boundary;									// Accretion rate
-static double R_isco, R_outer, X_isco, X_outer;		// Inner and outer radius
-static int N_grids;									// Number of grids
-static int N_sample;									// Number of samples
+static double M_dot_boundary;							// Accretion rate
+static double R_isco, R_outer, X_isco, X_outer;			// Inner and outer radius
+static int N_grids;										// Number of grids
 static double delta_X;									// Step size
-static double mu_p_hot = 0.63;								// proton ratio (ertan, 2002)
-static double mu_p_cold = 0.87;								// proton ratio
+static double mu_p_hot = 0.63;							// proton ratio (ertan, 2002)
+static double mu_p_cold = 0.87;							// proton ratio
 static double T_max;
 static double T_L = 99999999999;
 static double L_instant = 0, L_BB = 0;
@@ -60,7 +59,9 @@ static double L_edd = 0;
 static double M_dot_edd = 0;
 static double R_g = 0;
 bool CoronaFormed = false;
+bool MaximumLuminosityReached = false;
 double R_Corona, Theta_Corona;
+int trunc_radius_index = 0;
 
 
 
@@ -85,6 +86,7 @@ double T_c_max(double T_irr, double R);
 double T_c_min(double T_irr, double R);
 double irr_effect(double T_irr);
 double BB_Luminosity(double* T_eff, double* X);
+double BB_Luminosity(double* T_eff, double* X, int truncation_index);
 double GetLuminosity(double* T, double* X, double delta_X, int N_grids, double minEnergyEV, double maxEnergyEV, double resolutionEV);
 int FindHotIndex(double* vAlpha);
 double EffectiveTemperature_alternative(double M_dot, double R);
@@ -102,6 +104,7 @@ void CoronaIrradiationTemperature(double* T_irr, double L, double* R, double* H,
 void CoronaIrradiationTemperature(double* T_irr, double nu, double epsilon, double L, double* R, double* H, double R_corona);
 double TimeDependentCoronaRadius(double T_current, double T_corona, double T_rise, double R_initial, double R_max, bool Formed);
 int FindTruncationIndex(double R_corona, double* R);
+void GetGAS_RADIATION_ratio(double* GvsR, double* E, double* H, double* Alpha, double* T_c);
 
 
 int main(int argc, char **argv)
@@ -174,6 +177,7 @@ int main(int argc, char **argv)
 	double* vH = new double[N_grids];
 	double* vO = new double[N_grids];
 	double* vAlpha = new double[N_grids];
+	double* vGvsR = new double[N_grids];
 	double dT = 0;
 	double vJ_total = 0;
 	double vM_total = 0;
@@ -231,6 +235,7 @@ int main(int argc, char **argv)
 		vT_eff[i] = 0;
 		vT_c[i] = 10;
 		vM_dot[i] = 0;
+		vGvsR[i] = 0;
 	});
 
 
@@ -303,6 +308,9 @@ int main(int argc, char **argv)
 	// Add efficiency constant
 	L_instant = 0.1 * (vM_dot[0] * G * M_compact) / (2 * R_isco);		// Luminosity in ergs/s
 
+	GetGAS_RADIATION_ratio(vGvsR, vE, vH, vAlpha, vT_c);				// Calculate P_g/P_r ratio
+
+	WriteGraphData(vR, vGvsR, N_grids, "PGvsR.txt", false);
 	WriteGraphData(vR, vAlpha, N_grids, "AvsR.txt", false);
 	WriteGraphData(vR, vE, N_grids, "EvsR.txt", false);
 	WriteGraphData(vR, vV, N_grids, "VvsR.txt", false);
@@ -324,23 +332,13 @@ int main(int argc, char **argv)
 	{
 		cout << "Please enter the evolution duration. (months)\n";
 		cin >> n; T_max = n*month;
-
-		cout << "How many graphs are needed?\n";
-		cin >> N_sample;
 	}
 	else
 	{
 		T_max = stod(argv[9])*month;
-		N_sample = stod(argv[10]);
 	}
 
-	double* vT_sample = new double[N_sample];
-	double deltaT_sample = log(T_max) / (double)N_sample;
-	for (int i = 1; i <= N_sample; i++)
-	{
-		vT_sample[i - 1] = exp(i*deltaT_sample);
-	}
-	int N_L_sample = 10000;
+	int N_L_sample = 1000;			// 1000 yap
 	double* vLT_sample = new double[N_L_sample];
 	double deltaLT_sample = log(T_max) / (double)N_L_sample;
 	for (int i = 1; i <= N_L_sample; i++)
@@ -370,9 +368,13 @@ int main(int argc, char **argv)
 
 	ofstream file_Rhot;
 	file_Rhot.open("Rhot_T.txt", ios::out);
-	if (L_BB > 1e25)
-		file_Rhot << T / day << "\t" << vR[FindHotIndex(vAlpha)] << "\n";
-	file_Rhot.close();
+	file_Rhot << T / day << "\t" << vR[FindHotIndex(vAlpha)] << "\n";
+	file_Rhot.close(); 
+
+	ofstream file_Rtrunc;
+	file_Rtrunc.open("Rtrunc_T.txt", ios::out);
+	file_Rtrunc << T / day << "\t" << vR[FindTruncationIndex(vE, vH, vT_c, vAlpha)] << "\n";
+	file_Rtrunc.close();
 
 	while (T < T_max)
 	{
@@ -382,7 +384,6 @@ int main(int argc, char **argv)
 		vS[N_grids - 1] = pow(((vM_dot[N_grids - 2] * delta_X / (3. * PI) + vS[N_grids - 2] * vV[N_grids - 2]) 
 			/ (VISC_C(vAlpha[N_grids - 1], vO[N_grids - 1]) * pow(vX[N_grids - 1], (4. / 3.)))),
 			(3. / 5.));
-		
 		//************************************************************************************************
 		//************************************************************************************************
 
@@ -400,7 +401,6 @@ int main(int argc, char **argv)
 		//************************************************************************************************
 		parallel_for(1, N_grids - 1, [=](int i)
 		{
-
 			vS_new[i] = vS[i] + 0.75 * dT / pow((vX[i] * delta_X), 2) *
 				(vV[i + 1] * vS[i + 1] + vV[i - 1] * vS[i - 1] - 2. * vV[i] * vS[i]);
 			vV_new[i] = VISC_C(vAlpha[i], vO[i]) * pow(vX[i], (4. / 3.)) * pow(vS_new[i], (2. / 3.));
@@ -476,26 +476,31 @@ int main(int argc, char **argv)
 			});
 		}
 
-
-		L_instant = 0.1 * (vM_dot[0] * G * M_compact) / (2 * R_isco);		// Luminosity in ergs/s
+		L_instant = 0.1 * (vM_dot[trunc_radius_index] * G * M_compact) / (2 * vR[trunc_radius_index]);		// Luminosity in ergs/s
 
 		T += dT; // Increase time
 
+		// Check if maximum luminosity has been reached***************************************************************************************************************
+		//************************************************************************************************************************************************************
+		if (L_instant < L_previous && L_instant > 1e37 && !MaximumLuminosityReached)
+		{
+			cout << std::scientific;
+			cout << "Maximum luminosity reached -> L = " << L_instant << " erg/s at time T = " << T / day << " days.\n" << elapsed.count() << " ms have elapsed.\n\n";
+			MaximumLuminosityReached = true;
+		}
+		else if(L_instant > L_previous && !MaximumLuminosityReached)
+		{
+			L_previous = L_instant;
+		}
+		//************************************************************************************************************************************************************
+		//************************************************************************************************************************************************************
+
+		// Record Data************************************************************************************************************************************************
+		//************************************************************************************************************************************************************
 		if (l < N_L_sample)
 		{
 			if (T >= vLT_sample[l])
 			{
-				if (L_instant < L_previous && L_instant > 1e37)
-				{
-					cout << std::scientific;
-					cout << "Maximum luminosity reached -> L = " << L_instant << " erg/s at time T = " << T/day << " days.\n" << elapsed.count() << " ms have elapsed.\n\n";
-					T_L = T;
-					L_previous = 0;
-				}
-				else if (L_previous != 0)
-				{
-					L_previous = L_instant;
-				}
 				l++;
 				file.open("lightcurve.txt", ios::app);
 
@@ -503,7 +508,7 @@ int main(int argc, char **argv)
 					file << T / day << "\t" << L_instant << "\n";						// Write luminosity to file
 				file.close();
 
-				L_BB = BB_Luminosity(vT_eff, vX);
+				L_BB = BB_Luminosity(vT_eff, vX, trunc_radius_index);
 				file_bolo.open("lightcurve_bolo.txt", ios::app);
 				if (L_BB > 1e25)
 					file_bolo << T / day << "\t" << L_BB << "\n";						// Write luminosity to file
@@ -513,42 +518,47 @@ int main(int argc, char **argv)
 				if (L_BB > 1e25)
 					file_Rhot << T / day << "\t" << vR[FindHotIndex(vAlpha)] << "\n";						// Write luminosity to file
 				file_Rhot.close();
+
+				file_Rtrunc.open("Rtrunc_T.txt", ios::app);
+				if (L_BB > 1e25)
+					file_Rtrunc << T / day << "\t" << vR[FindTruncationIndex(vE, vH, vT_c, vAlpha)] << "\n";						// Write luminosity to file
+				file_Rtrunc.close();
+
+				if (MaximumLuminosityReached)
+				{
+					GetGAS_RADIATION_ratio(vGvsR, vE, vH, vAlpha, vT_c);				// Calculate P_g/P_r ratio
+
+					WriteGraphData(vR, vGvsR, N_grids, "PGvsR.txt", true);
+					WriteGraphData(vR, vAlpha, N_grids, "AvsR.txt", true);
+					WriteGraphData(vR, vE, N_grids, "EvsR.txt", true);
+					WriteGraphData(vR, vV, N_grids, "VvsR.txt", true);
+					WriteGraphData(vR, vM_dot, N_grids - 1, "MdotvsR.txt", true);
+					WriteGraphData(vR, vT_eff, N_grids - 2, "TeffvsR.txt", true);
+					WriteGraphData(vR, vT_c, N_grids - 2, "TcvsR.txt", true);
+					WriteGraphData(vR, vH, N_grids - 2, "HvsR.txt", true);
+					WriteGraphData(vR, vO, N_grids, "OvsR.txt", true);
+				}
+
+				end = std::chrono::high_resolution_clock::now();
+				elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+				cout << "Current time step is " << dT << " s.\n";
+				cout << std::scientific;
+				vJ_total = 0;
+				vM_total = 0;
+				parallel_for(0, N_grids, [=, &vJ_total, &vM_total](int i)
+				{
+					vJ_total += 4 * PI * sqrt(G * M_compact) * vX[i] * vS[i] * delta_X;
+					vM_total += 4 * PI * vS[i] * vX[i] * vX[i] * delta_X;
+				});
+				cout << "Total angular momentum is " << vJ_total << " g cm2 s-1.\n";
+				cout << "Total mass is             " << vM_total << " g.\n";
+				cout << "Hot disk radius is        " << vR[FindHotIndex(vAlpha)] << " cm.\n";
+				cout << "Luminosity is             " << (L_instant / L_edd) * 100 << "\% of Eddington Luminosity.\n";
+				cout << T / T_max * 100 << fixed << " percent completed! " << elapsed.count() << " ms have elapsed.\n\n";
 			}
 		}
-
-		// Take samples ***********************************************************************************
-		//*************************************************************************************************
-		if (T >= vT_sample[j])
-		{
-			j++;
-			WriteGraphData(vR, vAlpha, N_grids, "AvsR.txt", true);
-			WriteGraphData(vR, vE, N_grids, "EvsR.txt", true);
-			WriteGraphData(vR, vV, N_grids, "VvsR.txt", true);
-			WriteGraphData(vR, vM_dot, N_grids- 1, "MdotvsR.txt", true);
-			WriteGraphData(vR, vT_eff, N_grids - 2, "TeffvsR.txt", true);
-			WriteGraphData(vR, vT_c, N_grids - 2, "TcvsR.txt", true);
-			WriteGraphData(vR, vH, N_grids - 2, "HvsR.txt", true);
-			WriteGraphData(vR, vO, N_grids, "OvsR.txt", true);
-
-			end = std::chrono::high_resolution_clock::now();
-			elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-			cout << "Current time step is " << dT << " s.\n";
-			cout << std::scientific;
-			vJ_total = 0;
-			vM_total = 0;
-			parallel_for(0, N_grids, [=, &vJ_total, &vM_total](int i)
-			{
-				vJ_total += 4 * PI * sqrt(G * M_compact) * vX[i] * vS[i] * delta_X;
-				vM_total += 4 * PI * vS[i] * vX[i] * vX[i] * delta_X;
-			});
-			cout << "Total angular momentum is " << vJ_total << " g cm2 s-1.\n";
-			cout << "Total mass is             " << vM_total << " g.\n";
-			cout << "Hot disk radius is        " << vR[FindHotIndex(vAlpha)] << " cm.\n";
-			cout << "Luminosity is             " << (L_instant / L_edd) * 100 << "\% of Eddington Luminosity.\n";
-			cout << T/T_max * 100 << fixed << " percent completed! " << elapsed.count() << " ms have elapsed.\n\n";
-		}
-		//*************************************************************************************************
-		//*************************************************************************************************
+		//************************************************************************************************************************************************************
+		//************************************************************************************************************************************************************
 	}
 	cout << "All done!";
 	if (argc == 1)
@@ -606,6 +616,16 @@ double BB_Luminosity(double* T_eff, double* X)
 {
 	double L = 0;
 	for(int i = 0; i < N_grids; i++)
+	{
+		L += pow(X[i], 3) * pow(T_eff[i], 4) * a * 4 * PI * delta_X;
+	}
+	return L;
+}
+
+double BB_Luminosity(double* T_eff, double* X, int truncation_index)
+{
+	double L = 0;
+	for (int i = truncation_index; i < N_grids; i++)
 	{
 		L += pow(X[i], 3) * pow(T_eff[i], 4) * a * 4 * PI * delta_X;
 	}
@@ -1013,7 +1033,7 @@ void RadiationPressure(double* P_rad, double* T_c)
 {
 	parallel_for(0, N_grids, [=](int i)
 	{
-		P_rad[i] = 1. / 3. * rad_const * pow(T_c[i], 4);
+		P_rad[i] = 4. / 3. * a / c /* rad_const*/ * pow(T_c[i], 4);
 	});
 }
 
@@ -1057,9 +1077,9 @@ int FindTruncationIndex(double* E, double* H, double* T_c, double* Alpha)
 	RadiationPressure(P_rad, T_c);
 	GasPressure(P_gas, E, H, T_c, Alpha);
 
-	for (int i = 0; i < N_grids - 1; i++)
+	for (int i = N_grids - 2; i >= 0; i--)
 	{
-		if (P_rad[i] < P_gas[i] + 0.1 && P_rad[i + 1] < P_gas[i + 1])
+		if (P_rad[i] > P_gas[i] + 0.1 && P_rad[i + 1] > P_gas[i + 1])
 		{
 			int j = FindHotIndex(Alpha);
 			if (i <= j)
@@ -1100,6 +1120,18 @@ double TimeDependentCoronaRadius(double T_current, double T_corona, double T_ris
 	else return R_isco;
 }
 
+void GetGAS_RADIATION_ratio(double* GvsR, double* E, double* H, double* Alpha, double* T_c)
+{
+	double* P_rad = new double[N_grids];
+	double* P_gas = new double[N_grids];
 
+	RadiationPressure(P_rad, T_c);
+	GasPressure(P_gas, E, H, T_c, Alpha);
+
+	parallel_for(0, N_grids, [=](int i)
+	{
+		GvsR[i] = P_gas[i] / P_rad[i];
+	});
+}
 
 
