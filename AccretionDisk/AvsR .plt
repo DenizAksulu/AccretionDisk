@@ -1,5 +1,10 @@
 set xlabel "Radius (cm)"
-set ylabel "Alpha parameter"
-unset logscale xy
-
-plot for [i=0:100:2] "AvsR.txt" every :1::i::i
+set ylabel "Time (days)"
+set zlabel "Alpha parameter" rotate parallel
+#set hidden3d
+unset logscale xyz
+set grid
+unset logscale y
+#set pm3d at st
+#unset logscale cb
+splot "AvsR.txt" using 2:1:3 with lines #palette 

@@ -1,6 +1,11 @@
+
 set xlabel "Radius (cm)"
-set ylabel "Viscosity"
-
-set logscale xy
-
-plot for [i=0:100:2] "VvsR.txt" every :1::i::i
+set ylabel "Time (days)"
+set zlabel "Viscosity" rotate parallel
+#set hidden3d
+set logscale xyz
+set grid
+unset logscale y
+#set pm3d at st
+#set logscale cb
+splot "VvsR.txt" using 2:1:3 with lines

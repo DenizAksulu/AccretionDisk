@@ -105,6 +105,7 @@ void CoronaIrradiationTemperature(double* T_irr, double nu, double epsilon, doub
 double TimeDependentCoronaRadius(double T_current, double T_corona, double T_rise, double R_initial, double R_max, bool Formed);
 int FindTruncationIndex(double R_corona, double* R);
 void GetGAS_RADIATION_ratio(double* GvsR, double* E, double* H, double* Alpha, double* T_c);
+void WriteGraphData(double* X, double* Y, double T, int length, string filename, bool append);
 
 
 int main(int argc, char **argv)
@@ -135,7 +136,7 @@ int main(int argc, char **argv)
 
 	// Calculate some initial values
 	R_isco = 6 * G * M_compact / pow(c, 2);
-	R_outer = 3e11; // cm
+	R_outer = 3e11; // cm 
 	X_isco = sqrt(R_isco);
 	X_outer = sqrt(R_outer);
 	L_edd = 1.3e38 * (M_compact / M_solar);
@@ -310,15 +311,15 @@ int main(int argc, char **argv)
 
 	GetGAS_RADIATION_ratio(vGvsR, vE, vH, vAlpha, vT_c);				// Calculate P_g/P_r ratio
 
-	WriteGraphData(vR, vGvsR, N_grids, "PGvsR.txt", false);
-	WriteGraphData(vR, vAlpha, N_grids, "AvsR.txt", false);
-	WriteGraphData(vR, vE, N_grids, "EvsR.txt", false);
-	WriteGraphData(vR, vV, N_grids, "VvsR.txt", false);
-	WriteGraphData(vR, vM_dot, N_grids, "MdotvsR.txt", false);
-	WriteGraphData(vR, vT_eff, N_grids, "TeffvsR.txt", false);
-	WriteGraphData(vR, vT_c, N_grids, "TcvsR.txt", false);
-	WriteGraphData(vR, vH, N_grids, "HvsR.txt", false);
-	WriteGraphData(vR, vO, N_grids, "OvsR.txt", false);
+	WriteGraphData(vR, vGvsR, 0, N_grids, "PGvsR.txt", false);
+	WriteGraphData(vR, vAlpha, 0, N_grids, "AvsR.txt", false);
+	WriteGraphData(vR, vE, 0, N_grids, "EvsR.txt", false);
+	WriteGraphData(vR, vV, 0, N_grids, "VvsR.txt", false);
+	WriteGraphData(vR, vM_dot, 0, N_grids, "MdotvsR.txt", false);
+	WriteGraphData(vR, vT_eff, 0, N_grids, "TeffvsR.txt", false);
+	WriteGraphData(vR, vT_c, 0, N_grids, "TcvsR.txt", false);
+	WriteGraphData(vR, vH, 0, N_grids, "HvsR.txt", false);
+	WriteGraphData(vR, vO, 0, N_grids, "OvsR.txt", false);
 
 	auto end = std::chrono::high_resolution_clock::now();
 	auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
@@ -338,7 +339,7 @@ int main(int argc, char **argv)
 		T_max = stod(argv[9])*month;
 	}
 
-	int N_L_sample = 1000;			// 1000 yap
+	int N_L_sample = 500;			// 1000 yap
 	double* vLT_sample = new double[N_L_sample];
 	double deltaLT_sample = log(T_max) / (double)N_L_sample;
 	for (int i = 1; i <= N_L_sample; i++)
@@ -381,9 +382,11 @@ int main(int argc, char **argv)
 
 		// Determine outer boundary condition*************************************************************
 		//************************************************************************************************
-		vS[N_grids - 1] = pow(((vM_dot[N_grids - 2] * delta_X / (3. * PI) + vS[N_grids - 2] * vV[N_grids - 2]) 
-			/ (VISC_C(vAlpha[N_grids - 1], vO[N_grids - 1]) * pow(vX[N_grids - 1], (4. / 3.)))),
+		int boundary = N_grids;
+		vS[boundary - 1] = pow(((vM_dot[boundary - 2] * delta_X / (3. * PI) + vS[boundary - 2] * vV[boundary - 2])
+			/ (VISC_C(vAlpha[boundary - 1], vO[boundary - 1]) * pow(vX[boundary - 1], (4. / 3.)))),
 			(3. / 5.));
+		vV[N_grids - 1] = VISC_C(vAlpha[N_grids - 1], vO[N_grids - 1]) * pow(vX[N_grids - 1], (4. / 3.)) * pow(vS[N_grids - 1], (2. / 3.));
 		//************************************************************************************************
 		//************************************************************************************************
 
@@ -476,7 +479,7 @@ int main(int argc, char **argv)
 			});
 		}
 
-		L_instant = 0.1 * (vM_dot[trunc_radius_index] * G * M_compact) / (2 * vR[trunc_radius_index]);		// Luminosity in ergs/s
+		L_instant = 0.1 * (vM_dot[0] * G * M_compact) / (2 * vR[0]);		// Luminosity in ergs/s
 
 		T += dT; // Increase time
 
@@ -528,15 +531,15 @@ int main(int argc, char **argv)
 				{
 					GetGAS_RADIATION_ratio(vGvsR, vE, vH, vAlpha, vT_c);				// Calculate P_g/P_r ratio
 
-					WriteGraphData(vR, vGvsR, N_grids, "PGvsR.txt", true);
-					WriteGraphData(vR, vAlpha, N_grids, "AvsR.txt", true);
-					WriteGraphData(vR, vE, N_grids, "EvsR.txt", true);
-					WriteGraphData(vR, vV, N_grids, "VvsR.txt", true);
-					WriteGraphData(vR, vM_dot, N_grids - 1, "MdotvsR.txt", true);
-					WriteGraphData(vR, vT_eff, N_grids - 2, "TeffvsR.txt", true);
-					WriteGraphData(vR, vT_c, N_grids - 2, "TcvsR.txt", true);
-					WriteGraphData(vR, vH, N_grids - 2, "HvsR.txt", true);
-					WriteGraphData(vR, vO, N_grids, "OvsR.txt", true);
+					WriteGraphData(vR, vGvsR, 0, N_grids, "PGvsR.txt", true);
+					WriteGraphData(vR, vAlpha, T, N_grids, "AvsR.txt", true);
+					WriteGraphData(vR, vE, T, N_grids, "EvsR.txt", true);
+					WriteGraphData(vR, vV, T, N_grids, "VvsR.txt", true);
+					WriteGraphData(vR, vM_dot, T, N_grids, "MdotvsR.txt", true);
+					WriteGraphData(vR, vT_eff, T, N_grids, "TeffvsR.txt", true);
+					WriteGraphData(vR, vT_c, T, N_grids, "TcvsR.txt", true);
+					WriteGraphData(vR, vH, T, N_grids, "HvsR.txt", true);
+					WriteGraphData(vR, vO, T, N_grids, "OvsR.txt", true);
 				}
 
 				end = std::chrono::high_resolution_clock::now();
@@ -603,6 +606,20 @@ void WriteGraphData(double* X, int* Y, int length, string filename, bool append)
 	{
 		fprintf(file, "%lf\t%d\n", X[i], Y[i]);
 	});
+	fprintf(file, "\n");
+	fclose(file);
+}
+void WriteGraphData(double* X, double* Y, double T, int length, string filename, bool append)
+{
+	FILE* file;
+	if (!append)
+		file = fopen(filename.c_str(), "w");
+	else
+		file = fopen(filename.c_str(), "a");
+	for(int i=0; i < length; i++)
+	{
+		fprintf(file, "%lf\t%lf\t%lf\n", T/day, X[i], Y[i]);
+	}
 	fprintf(file, "\n");
 	fclose(file);
 }
@@ -1130,7 +1147,7 @@ void GetGAS_RADIATION_ratio(double* GvsR, double* E, double* H, double* Alpha, d
 
 	parallel_for(0, N_grids, [=](int i)
 	{
-		GvsR[i] = P_gas[i] / P_rad[i];
+		GvsR[i] = P_rad[i] / P_gas[i];
 	});
 }
 

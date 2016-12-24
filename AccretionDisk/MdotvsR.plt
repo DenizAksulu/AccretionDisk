@@ -1,6 +1,10 @@
 set xlabel "Radius (cm)"
-set ylabel "Mass flow rate(g s^{-1})"
-
-set logscale xy
-
-plot for [i=0:100:2] "MdotvsR.txt" every :1::i::i
+set ylabel "Time (days)"
+set zlabel "Mass flow rate(g s^{-1})" rotate parallel
+#set hidden3d
+set logscale xyz
+set grid
+unset logscale y
+#set pm3d at st
+#set logscale cb
+splot "MdotvsR.txt" using 2:1:3 with lines
