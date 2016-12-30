@@ -83,8 +83,7 @@ void alpha(double* Alpha, double* T);
 double VISC_C(double alpha, double opacity);
 double average(double numbers[], int size); 
 double alpha_alternative(double T_c, double T_irr, double R);
-double alpha_alternative(double* vAlpha, double* T_c, double* T_irr, double* R);
-double alpha_alternative_smooth(double* vAlpha, double* T_c, double* T_irr, double* R);
+double alpha_alternative(vector<double> vAlpha, vector<double> T_c, vector<double> T_irr, vector<double> R);
 double T_critical(double T_irr, double R);
 double T_c_max(double T_irr, double R);
 double T_c_min(double T_irr, double R);
@@ -102,7 +101,6 @@ double alpha_compare(vector<double> vAlpha, vector<double> E, vector<double> T_i
 void RadiationPressure(double* P_rad, double* T_c);
 void GasPressure(double* P_gas, double* E, double* H, double* T_c, double* Alpha); 
 void ScaleHeight_FrankKingRaine(double * H, double * E, double * T_c, double* M_dot, double* R, double* Alpha);
-int FindTruncationIndex(double* E, double* H, double* T_c, double* Alpha);
 void GetShadows(int* Shadows, double* R, double* H, double R_corona, double Theta_corona); 
 void CoronaIrradiationTemperature(double* T_irr, double L, double* R, double* H, double R_corona, double Theta_corona);
 void CoronaIrradiationTemperature(double* T_irr, double nu, double epsilon, double L, double* R, double* H, double R_corona);
@@ -237,7 +235,7 @@ int main(int argc, char **argv)
 
 	
 	double Mu = 5e10; // cm
-	double Sigma = 1e10;
+	double Sigma = 1e10; // 1e10 previously
 	double E_0 = NormalizationGaussian(Mu, Sigma, R_isco, R_outer, M_disk);
 
 	parallel_for(0, N_grids, [=, &J_total, &M_total, &E, &S, &O, &Alpha, &X, &R](int i)
@@ -248,7 +246,7 @@ int main(int argc, char **argv)
 		S[i] = X[i] * E[i];															// Calculate initial S values
 
 		O[i] = thompson / m_p;													// Calculate initial opacity values
-		Alpha[i] = alpha_hot;													// Initial Alpha parameter values (alpha_hot)
+		Alpha[i] = alpha_cold;													// Initial Alpha parameter values (alpha_hot)
 
 		J_total += 4 * PI * sqrt(G * M_compact) * X[i] * S[i] * delta_X;			// Calculate total angular momentum
 		M_total += 4 * PI * S[i] * X[i] * X[i] * delta_X;						// Calculate total mass
@@ -473,8 +471,13 @@ int main(int argc, char **argv)
 			E[i] = S[i] / X[i];
 		});
 		
-		// Calculate new alpha values
-		alpha_compare(Alpha, E, T_irr, R);
+		parallel_for(0, N_grids, [=, &Alpha](int i)
+		{
+			if (E[i] > E_max(T_irr[i], R[i]))
+				Alpha[i] = alpha_hot;
+			if (E[i] < E_min(T_irr[i], R[i]))
+				Alpha[i] = alpha_cold;
+		});
 
 		// Calculate local values in a self-consistent way ****************************************************************************
 		//*******************************************************************************************************************************
@@ -559,7 +562,7 @@ int main(int argc, char **argv)
 				file << T / day << "\t" << L_instant << "\n";						// Write luminosity to file
 			file.close();
 
-			L_BB = BB_Luminosity(T_eff, X);
+			L_BB = 0.1 * BB_Luminosity(T_eff, X);
 			file_bolo.open("lightcurve_bolo.txt", ios::app);
 			if (L_BB > 1e25)
 				file_bolo << T / day << "\t" << L_BB << "\n";						// Write luminosity to file
@@ -978,9 +981,9 @@ double alpha_alternative(double T_c, double T_irr, double R)
 		return alpha_cold;
 }
 
-double alpha_alternative(double* vAlpha, double* T_c, double* T_irr, double* R)
+double alpha_alternative(vector<double> vAlpha, vector<double> T_c, vector<double> T_irr, vector<double> R)
 {
-	parallel_for(0, N_grids, [=](int i)
+	parallel_for(0, N_grids, [=, &vAlpha](int i)
 	{
 		double criticaltemp = T_critical(T_irr[i], R[i]);
 		double power = pow(1 + pow(criticaltemp / T_c[i], 8), -1);
@@ -989,7 +992,6 @@ double alpha_alternative(double* vAlpha, double* T_c, double* T_irr, double* R)
 			vAlpha[i] = calc;
 		else
 		{
-			//cout << "alpha = " << std::scientific << calc;
 			vAlpha[i] = alpha_hot;
 		}
 	});
