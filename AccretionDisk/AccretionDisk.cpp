@@ -136,7 +136,7 @@ int main(int argc, char **argv)
 
 	// Calculate some initial values
 	R_isco = 6 * G * M_compact / pow(c, 2);
-	R_outer = 3e11; // cm 
+	R_outer = 5e10; // cm 
 	X_isco = sqrt(R_isco);
 	X_outer = sqrt(R_outer);
 	L_edd = 1.3e38 * (M_compact / M_solar);
