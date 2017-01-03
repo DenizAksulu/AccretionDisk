@@ -83,7 +83,7 @@ void alpha(double* Alpha, double* T);
 double VISC_C(double alpha, double opacity);
 double average(double numbers[], int size); 
 double alpha_alternative(double T_c, double T_irr, double R);
-double alpha_alternative(vector<double> vAlpha, vector<double> T_c, vector<double> T_irr, vector<double> R);
+void alpha_alternative(vector<double> vAlpha, vector<double> T_c, vector<double> T_irr, vector<double> R);
 double T_critical(double T_irr, double R);
 double T_c_max(double T_irr, double R);
 double T_c_min(double T_irr, double R);
@@ -97,7 +97,7 @@ double EffectiveTemperature_dubus2014(double E, double R, double V);
 double CentralTemperature_dubus2014(double tau, double T_eff, double T_irr);
 double E_max(double T_irr, double R);
 double E_min(double T_irr, double R); 
-double alpha_compare(vector<double> vAlpha, vector<double> E, vector<double> T_irr, vector<double> R);
+void alpha_compare(vector<double> vAlpha, vector<double> E, vector<double> T_irr, vector<double> R);
 void RadiationPressure(double* P_rad, double* T_c);
 void GasPressure(double* P_gas, double* E, double* H, double* T_c, double* Alpha); 
 void ScaleHeight_FrankKingRaine(double * H, double * E, double * T_c, double* M_dot, double* R, double* Alpha);
@@ -240,7 +240,7 @@ int main(int argc, char **argv)
 	double Sigma = 1e10; // 1e10 previously
 	double E_0 = NormalizationGaussian(Mu, Sigma, R_isco, R_outer, M_disk);
 
-	parallel_for(0, N_grids, [=, &J_total, &M_total, &E, &S, &O, &Alpha, &X, &R](int i)
+	parallel_for(0, N_grids, [=, &E, &S, &O, &Alpha, &X, &R, &V](int i)
 	{
 		X[i] = X_isco + i * delta_X;												// Determine grids in X space
 		R[i] = X[i] * X[i];															// Determine grids in R space
@@ -248,7 +248,13 @@ int main(int argc, char **argv)
 		S[i] = X[i] * E[i];															// Calculate initial S values
 
 		O[i] = thompson / m_p;													// Calculate initial opacity values
-		Alpha[i] = alpha_cold;													// Initial Alpha parameter values (alpha_hot)
+		Alpha[i] = alpha_hot;													// Initial Alpha parameter values (alpha_hot)
+		
+		//************************************************************************
+		// Calculate viscosity ***************************************************
+		V[i] = VISC_C(Alpha[i], O[i]) * pow(X[i], (4. / 3.)) * pow(S[i], (2. / 3.));
+		//************************************************************************
+		//************************************************************************
 	});
 
 
@@ -267,19 +273,20 @@ int main(int argc, char **argv)
 	//*******************************************************************************************************************************
 	for (int j = 0; j < 100; j++)
 	{
-		parallel_for(0, N_grids, [=, &E, &V, &Alpha, &O, &S, &H, &T_c, &T_eff, &V_new, &S_new](int i)
+		parallel_for(0, N_grids, [=, &E, &V, &Alpha, &O, &S, &H, &T_c, &T_eff, &V_new, &S_new](int l)
 		{
-			//************************************************************************
-			// Calculate viscosity ***************************************************
-			V[i] = VISC_C(Alpha[i], O[i]) * pow(X[i], (4. / 3.)) * pow(S[i], (2. / 3.));
-			V_new[i] = V[i]; // assume that viscosity is the same one time step later
-			S_new[i] = S[i]; // assume that density is the same one time step later
-			//************************************************************************
-			//************************************************************************
+			T_eff[l] = EffectiveTemperature_dubus2014(E[l], R[l], V[l]);
+			T_c[l] = CentralTemperature_dubus2014(OpticalThickness(E[l], O[l]), T_eff[l], 0);
 
-			T_eff[i] = EffectiveTemperature_dubus2014(E[i], R[i], V[i]);
-			T_c[i] = CentralTemperature_dubus2014(OpticalThickness(E[i], O[i]), T_eff[i], 0);
-			H[i] = sqrt((T_c[i] * k * pow(R[i], 3)) / (mu_p(Alpha[i]) * m_p * G * M_compact));
+			if (T_c[l] > T_c_max(T_irr[l], R[l]) && Alpha[l] == alpha_cold)
+				Alpha[l] = alpha_hot;
+			if (T_c[l] < T_c_min(T_irr[l], R[l]) && Alpha[l] == alpha_hot)
+				Alpha[l] = alpha_cold;
+
+			H[l] = sqrt((T_c[l] * k * pow(R[l], 3)) / (mu_p(Alpha[l]) * m_p * G * M_compact));
+			V[l] = Viscosity(T_c[l], Alpha[l], H[l]);
+			V_new[l] = V[l];
+			S_new[l] = S[l];
 
 			// Find Opacity value*****************************************************
 			//************************************************************************
@@ -287,12 +294,12 @@ int main(int argc, char **argv)
 			// 19 R values in the table
 			for (int m = 0; m < 19; m++)
 			{
-				if (log10((E[i] / (2 * H[i])) / pow(T_c[i] * 1e-6, 3)) >= logR[18])
+				if (log10((E[l] / (2 * H[l])) / pow(T_c[l] * 1e-6, 3)) >= logR[18])
 				{
 					a = 18;
 					break;
 				}
-				if (log10((E[i] / (2 * H[i])) / pow(T_c[i] * 1e-6, 3)) < logR[m])
+				if (log10((E[l] / (2 * H[l])) / pow(T_c[l] * 1e-6, 3)) < logR[m])
 				{
 					a = m;
 					break;
@@ -301,19 +308,19 @@ int main(int argc, char **argv)
 			// 88 T values in the table
 			for (int n = 0; n < 88; n++)
 			{
-				if (log10(T_c[i]) >= logT[87])
+				if (log10(T_c[l]) >= logT[87])
 				{
 					b = 87;
 					break;
 				}
-				if (log10(T_c[i]) < logT[n])
+				if (log10(T_c[l]) < logT[n])
 				{
 					b = n;
 					break;
 				}
 			}
 
-			O[i] = pow(10, opacity[a][b]);
+			O[l] = pow(10, opacity[a][b]);
 			//************************************************************************
 			//************************************************************************
 		});
@@ -474,20 +481,17 @@ int main(int argc, char **argv)
 			{
 				parallel_for(0, N_grids, [=, &O, &H, &T_c, &T_eff, &V, &Alpha, &E, &S, &V_new](int l)
 				{
-					S[l] = S_new[l];
-					V[l] = V_new[l];
-					E[l] = S[l] / X[l];
-					T_eff[l] = EffectiveTemperature_dubus2014(E[l], R[l], V[l]);
+					E[l] = S_new[l] / X[l];
+					T_eff[l] = EffectiveTemperature_dubus2014(E[l], R[l], V_new[l]);
 					T_c[l] = CentralTemperature_dubus2014(OpticalThickness(E[l], O[l]), T_eff[l], 0);
 
-					if (T_c[l] > T_c_max(T_irr[l], R[l]))
+					if (T_c[l] > T_c_max(T_irr[l], R[l]) && Alpha[l] == alpha_cold)
 						Alpha[l] = alpha_hot;
-					if (T_c[l] < T_c_min(T_irr[l], R[l]))
+					if (T_c[l] < T_c_min(T_irr[l], R[l]) && Alpha[l] == alpha_hot)
 						Alpha[l] = alpha_cold;
 
 					H[l] = sqrt((T_c[l] * k * pow(R[l], 3)) / (mu_p(Alpha[l]) * m_p * G * M_compact));
-					V[l] = Viscosity(T_c[l], Alpha[l], H[l]);
-					V_new[l] = V[l];
+					V_new[l] = Viscosity(T_c[l], Alpha[l], H[l]);
 
 					// Find Opacity value*****************************************************
 					//************************************************************************
@@ -534,6 +538,7 @@ int main(int argc, char **argv)
 		{
 			S[i] = S_new[i];
 			V[i] = V_new[i];
+			E[i] = S[i] / X[i];
 		});
 
 		for (int i = 0; i < N_grids - 2; i++)
@@ -616,7 +621,7 @@ int main(int argc, char **argv)
 				J_total += 4 * PI * sqrt(G * M_compact) * X[i] * S[i] * delta_X;
 				M_total += 4 * PI * S[i] * X[i] * X[i] * delta_X;
 			}
-			cout << "Current time is           " << T / day << "days.\n";
+			cout << "Current time is           " << T / day << " days.\n";
 			cout << "Total angular momentum is " << J_total << " g cm2 s-1.\n";
 			cout << "Total mass is             " << M_total << " g.\n";
 			cout << (double)T / T_max * 100 << fixed << " percent completed! " << elapsed.count() << " ms have elapsed.\n\n";
@@ -1001,7 +1006,7 @@ double alpha_alternative(double T_c, double T_irr, double R)
 		return alpha_cold;
 }
 
-double alpha_alternative(vector<double> vAlpha, vector<double> T_c, vector<double> T_irr, vector<double> R)
+void alpha_alternative(vector<double> vAlpha, vector<double> T_c, vector<double> T_irr, vector<double> R)
 {
 	parallel_for(0, N_grids, [=, &vAlpha](int i)
 	{
@@ -1017,7 +1022,7 @@ double alpha_alternative(vector<double> vAlpha, vector<double> T_c, vector<doubl
 	});
 }
 
-double alpha_compare(vector<double> vAlpha, vector<double> E, vector<double> T_irr, vector<double> R)
+void alpha_compare(vector<double> vAlpha, vector<double> E, vector<double> T_irr, vector<double> R)
 {
 	parallel_for(0, N_grids, [=, &vAlpha](int i)
 	{
