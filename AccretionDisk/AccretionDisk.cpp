@@ -71,19 +71,13 @@ bool Diverging = false;
 
 double OpticalThickness(double SurfaceDensity, double opacity);
 double NormalizationGaussian(double Mu, double Sigma, double R_isco, double R_outer, double M_disk);
-void WriteGraphData(double* X, double* Y, int length, string filename, bool append);
-void WriteGraphData(double* X, int* Y, int length, string filename, bool append);
+void WriteGraphData(double* X, double* Y, int length, string filename, bool append); 
+void WriteGraphData(vector<double> X, vector<int> Y, double T, int length, string filename, bool append);
 double eVtoHz(double eV);
 void ExtractSpectrum(double* T, double* X, double delta_X, int N_grids, double minEnergyEV, double maxEnergyEV, double resolutionEV, bool append);
-void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilon, double L, double* R, double* H, double offset, bool shadow_enable);
-double* IrradiationTemperaturePower_4(int N_grids, double nu, double epsilon, double L, double* R, double* H);
 double mu_p(double alpha);
-double alpha(double T);
-void alpha(double* Alpha, double* T);
 double VISC_C(double alpha, double opacity);
 double average(double numbers[], int size); 
-double alpha_alternative(double T_c, double T_irr, double R);
-void alpha_alternative(vector<double> vAlpha, vector<double> T_c, vector<double> T_irr, vector<double> R);
 double T_critical(double T_irr, double R);
 double T_c_max(double T_irr, double R);
 double T_c_min(double T_irr, double R);
@@ -92,26 +86,21 @@ double BB_Luminosity(vector<double> T_eff, vector<double> X);
 double BB_Luminosity(double* T_eff, double* X, int truncation_index); 
 double GetLuminosity(vector<double> T, vector<double> X, double minEnergyEV, double maxEnergyEV, double resolutionEV);
 int FindHotIndex(vector<double> vAlpha);
-double EffectiveTemperature_alternative(double M_dot, double R);
 double EffectiveTemperature_dubus2014(double E, double R, double V);
 double CentralTemperature_dubus2014(double tau, double T_eff, double T_irr);
 double E_max(double T_irr, double R);
 double E_min(double T_irr, double R); 
-void alpha_compare(vector<double> vAlpha, vector<double> E, vector<double> T_irr, vector<double> R);
 void RadiationPressure(double* P_rad, double* T_c);
 void GasPressure(double* P_gas, double* E, double* H, double* T_c, double* Alpha); 
 void ScaleHeight_FrankKingRaine(double * H, double * E, double * T_c, double* M_dot, double* R, double* Alpha);
 double SoundSpeed(double T_c, double alpha);
-void GetShadows(int* Shadows, double* R, double* H, double R_corona, double Theta_corona); 
-void CoronaIrradiationTemperature(double* T_irr, double L, double* R, double* H, double R_corona, double Theta_corona);
-void CoronaIrradiationTemperature(double* T_irr, double nu, double epsilon, double L, double* R, double* H, double R_corona);
 double TimeDependentCoronaRadius(double T_current, double T_corona, double T_rise, double R_initial, double R_max, bool Formed);
-int FindTruncationIndex(double R_corona, double* R);
-void GetGAS_RADIATION_ratio(double* GvsR, double* E, double* H, double* Alpha, double* T_c); 
 void WriteGraphData(vector<double> X, vector<double> Y, double T, int length, string filename, bool append);
 void printmatrix(vector<vector<double>> matrix, int rows, int columns);
 void printmatrix(double* matrix, int rows);
 double Viscosity(double T_c, double alpha, double H);
+void IrradiationTemperature_CentralPointSource(double LUMINOSITY, vector<double> R, vector<double> H, vector<double> &T_irr, bool ShadowEnabled);
+void GetShadows(vector<int> &Shadows, vector<double> R, vector<double> H, double R_corona, double Theta_corona);
 
 
 int main(int argc, char **argv)
@@ -276,7 +265,7 @@ int main(int argc, char **argv)
 		parallel_for(0, N_grids, [=, &E, &V, &Alpha, &O, &S, &H, &T_c, &T_eff, &V_new, &S_new](int l)
 		{
 			T_eff[l] = EffectiveTemperature_dubus2014(E[l], R[l], V[l]);
-			T_c[l] = CentralTemperature_dubus2014(OpticalThickness(E[l], O[l]), T_eff[l], 0);
+			T_c[l] = CentralTemperature_dubus2014(OpticalThickness(E[l], O[l]), T_eff[l],0);
 
 			if (T_c[l] > T_c_max(T_irr[l], R[l]) && Alpha[l] == alpha_cold)
 				Alpha[l] = alpha_hot;
@@ -360,11 +349,15 @@ int main(int argc, char **argv)
 
 	//*************************************************************************************************************
 	// Save initial conditions ************************************************************************************
+	vector<int> Shadows(N_grids, 0);
+	GetShadows(Shadows, R, H, 0, 0);
+	WriteGraphData(R, Shadows, 0, N_grids, "ShadowsvsR.txt", false);
 	WriteGraphData(R, Alpha, 0, N_grids, "AvsR.txt", false);
 	WriteGraphData(R, E, 0, N_grids, "EvsR.txt", false);
 	WriteGraphData(R, V, 0, N_grids, "VvsR.txt", false);
 	WriteGraphData(R, M_dot, 0, N_grids, "MdotvsR.txt", false);
 	WriteGraphData(R, T_eff, 0, N_grids, "TeffvsR.txt", false);
+	WriteGraphData(R, T_irr, 0, N_grids, "TirrvsR.txt", false);
 	WriteGraphData(R, T_c, 0, N_grids, "TcvsR.txt", false);
 	WriteGraphData(R, H, 0, N_grids, "HvsR.txt", false);
 	WriteGraphData(R, O, 0, N_grids, "OvsR.txt", false);
@@ -407,6 +400,7 @@ int main(int argc, char **argv)
 	start = chrono::high_resolution_clock::now(); // Start high resolution clock for time measurement
 	int time_index = 0;			// time index
 	double T = 0;
+	double T_corona = T_max;
 	while (T < T_max) // iterate over time
 	{
 		// Determine outer boundary condition***************************************************************************************************************
@@ -479,6 +473,10 @@ int main(int argc, char **argv)
 			//*******************************************************************************************************************************
 			for (int m = 0; m < 4; m++)
 			{
+				if (MaximumLuminosityReached)
+				{
+					IrradiationTemperature_CentralPointSource(L_instant, R, H, T_irr, !CoronaFormed);					// Start irradiation
+				}
 				parallel_for(0, N_grids, [=, &O, &H, &T_c, &T_eff, &V, &Alpha, &E, &S, &V_new](int l)
 				{
 					E[l] = S_new[l] / X[l];
@@ -552,17 +550,18 @@ int main(int argc, char **argv)
 
 		T += delta_T;
 
-		// Check if maximum luminosity has been reached***************************************************************************************************************
+		// Check if corona has been formed***************************************************************************************************************
 		//************************************************************************************************************************************************************
-		if (L_instant < L_previous && L_instant > 1e37 && !MaximumLuminosityReached)
+		if (MaximumLuminosityReached && L_instant < 0.01 * L_edd && !CoronaFormed && T < T_corona)
 		{
-			cout << std::scientific;
-			cout << "Maximum luminosity reached -> L = " << L_instant << " erg/s at time T = " << T / day << " days.\n" << elapsed.count() << " ms have elapsed.\n\n";
-			MaximumLuminosityReached = true;
+			CoronaFormed = true;
+			T_corona = T;
+			cout << "Corona formed at time T = " << T / day << " days.\n" << elapsed.count() << " ms have elapsed.\n\n";
 		}
-		else if (L_instant > L_previous && !MaximumLuminosityReached)
+		else if (CoronaFormed && T > T_corona + 40 * day)
 		{
-			L_previous = L_instant;
+			CoronaFormed = false;
+			cout << "Corona has vanished at time T = " << T / day << " days.\n" << elapsed.count() << " ms have elapsed.\n\n";
 		}
 		//************************************************************************************************************************************************************
 		//************************************************************************************************************************************************************
@@ -570,6 +569,21 @@ int main(int argc, char **argv)
 		if (T >= T_max / N_samples * s)
 		{
 			s++;
+
+			// Check if maximum luminosity has been reached***************************************************************************************************************
+			//************************************************************************************************************************************************************
+			if (L_instant < L_previous && !MaximumLuminosityReached && L_instant > 0.01 * L_edd)
+			{
+				cout << std::scientific;
+				cout << "Maximum luminosity reached -> L = " << L_instant << " erg/s at time T = " << T / day << " days.\n" << elapsed.count() << " ms have elapsed.\n\n";
+				MaximumLuminosityReached = true;
+			}
+			else if (!MaximumLuminosityReached)
+			{
+				L_previous = L_instant;
+			}
+			//************************************************************************************************************************************************************
+			//************************************************************************************************************************************************************
 
 			//**************************************************************************************************************************
 			// Lightcurves *************************************************************************************************************
@@ -600,11 +614,14 @@ int main(int argc, char **argv)
 
 			//**************************************************************************************************************************
 			// Take samples ************************************************************************************************************
+			GetShadows(Shadows, R, H, 0, 0);
+			WriteGraphData(R, Shadows, T, N_grids, "ShadowsvsR.txt", true);
 			WriteGraphData(R, Alpha, T, N_grids, "AvsR.txt", true);
 			WriteGraphData(R, E, T, N_grids, "EvsR.txt", true);
 			WriteGraphData(R, V, T, N_grids, "VvsR.txt", true);
 			WriteGraphData(R, M_dot, T, N_grids, "MdotvsR.txt", true);
 			WriteGraphData(R, T_eff, T, N_grids, "TeffvsR.txt", true);
+			WriteGraphData(R, T_irr, T, N_grids, "TirrvsR.txt", true);
 			WriteGraphData(R, T_c, T, N_grids, "TcvsR.txt", true);
 			WriteGraphData(R, H, T, N_grids, "HvsR.txt", true);
 			WriteGraphData(R, O, T, N_grids, "OvsR.txt", true);
@@ -622,6 +639,7 @@ int main(int argc, char **argv)
 				M_total += 4 * PI * S[i] * X[i] * X[i] * delta_X;
 			}
 			cout << "Current time is           " << T / day << " days.\n";
+			cout << "Luminosity is             " << L_instant << " erg/s (i.e. " << L_instant/L_edd * 100 << " \% of Eddington luminosity).\n";
 			cout << "Total angular momentum is " << J_total << " g cm2 s-1.\n";
 			cout << "Total mass is             " << M_total << " g.\n";
 			cout << (double)T / T_max * 100 << fixed << " percent completed! " << elapsed.count() << " ms have elapsed.\n\n";
@@ -659,17 +677,17 @@ void WriteGraphData(double* X, double* Y, int length, string filename, bool appe
 	fprintf(file, "\n");
 	fclose(file);
 }
-void WriteGraphData(double* X, int* Y, int length, string filename, bool append)
+void WriteGraphData(vector<double> X, vector<int> Y, double T, int length, string filename, bool append)
 {
 	FILE* file;
 	if (!append)
 		file = fopen(filename.c_str(), "w");
 	else
 		file = fopen(filename.c_str(), "a");
-	parallel_for(0, length, [=, &file](int i)
+	for (int i = 0; i < length; i++)
 	{
-		fprintf(file, "%lf\t%d\n", X[i], Y[i]);
-	});
+		fprintf(file, "%lf\t%lf\t%d\n", T / day, X[i], Y[i]);
+	}
 	fprintf(file, "\n");
 	fclose(file);
 }
@@ -763,142 +781,45 @@ double GetLuminosity(vector<double> T, vector<double> X, double minEnergyEV, dou
 	}
 	return L;
 }
-// Point source assumed
-void IrradiationTemperature(double* T_irr, int N_grids, double nu, double epsilon, double L, double* R, double* H, double offset, bool shadow_enable)
+
+void IrradiationTemperature_CentralPointSource(double LUMINOSITY, vector<double> R, vector<double> H, vector<double> &T_irr, bool ShadowEnabled)
 {
-	bool shadow = false;
-	parallel_for(0, N_grids - 1, [=, &shadow](int i)
+	vector<int> Shadows(N_grids, 0);
+	if(ShadowEnabled)
+		GetShadows(Shadows, R, H, 0, 0);									// Get shadows 
+	
+	parallel_for(0, N_grids - 1, [=, &T_irr](int i)
 	{
-		if (shadow_enable)
+		if (Shadows[i] == 0)
 		{
-			int n = 0;
-			shadow = false;
-			parallel_for(0, i + 1, [=, &shadow, &n](int j)
-			{
-				if (atan((H[i + 1] - offset) / R[i + 1]) < atan((H[j] - offset) / R[j]))
-				{
-					n++;
-				}
-			});
-			if (n > 1)
-			{
-				T_irr[i + 1] = 0;
-				shadow = true;
-			}
+			double d_2 = R[i] * R[i] + H[i] * H[i];						// Distance from central point source
+			double theta = atan(H[i + 1] / R[i + 1]);					// elevation of disk element
+			double tan_phi = (H[i + 1] - H[i]) / (R[i + 1] - R[i]);		
+			double phi = atan(tan_phi);									// slope angle of disk element
+			double Flux_disk = LUMINOSITY / (d_2 * 4 * PI) * sin(abs(theta - phi));
+			T_irr[i] = pow((Flux_disk / a), 0.25);
 		}
-		if (!shadow)
-		{
-			//double C = nu * (1 - epsilon)*((H[i + 1] - H[i]) / (R[i + 1] - R[i]) - H[i + 1] / R[i + 1]);
-			double C = nu * 1e-3;/* nu * (1 - epsilon) * (2. / 35.)*(H[i + 1] / R[i + 1]); // lasota (2014)*/
-			if (C > 0 && L > 0)
-				T_irr[i + 1] = pow(C * L / (4 * PI * a * R[i + 1] * R[i + 1]), 0.25);
-			else
-				T_irr[i + 1] = 0;
-		}
+		else
+			T_irr[i] = 0;
 	});
+
 }
 
-void CoronaIrradiationTemperature(double* T_irr, double L, double* R, double* H, double R_corona, double Theta_corona)
-{
-	int* Shadows = new int[N_grids];
-	GetShadows(Shadows, R, H, R_corona, Theta_corona);
-	parallel_for(0, N_grids - 1, [=](int i)
-	{
-		if (Shadows[i + 1] != 1)
-		{
-			double R_2 = pow(H[i + 1], 2) + pow(R[i + 1], 2);	// square of radial coordinate of disk element
-			double Theta = atan(H[i + 1] / R[i + 1]);			// elevation of disk element
-			double d_2 = pow(R_corona, 2) + R_2 + 2 * R_corona * sqrt(R_2) * cos(Theta_corona - Theta);	// square of distance between corona element and disk element
-			double beta_prime = acos((d_2 + R_2 - pow(R_corona, 2)) / (2 * sqrt(d_2 * R_2)));
-			double slope_angle = atan((H[i + 1] - H[i]) / (R[i + 1] / R[i]));
-			double beta = beta_prime + slope_angle - Theta;												// viewing angle of corona
-
-			double L_disk = L / (4 * PI * d_2) * sin(beta);
-			if (L > 0)
-			{
-				T_irr[i + 1] = pow(L_disk / a, 0.25);
-			}
-			else
-				T_irr[i + 1] = 0;
-		}
-	});
-}
-
-// Integral
-void CoronaIrradiationTemperature(double* T_irr, double nu, double epsilon, double L, double* R, double* H, double R_corona)
-{
-	int N_corona = 20;
-	double* Theta_int = new double[N_corona];
-	double Delta_Theta_corona = PI / (2 * (N_corona - 1));
-	parallel_for(0, N_corona, [=](int i)
-	{
-		Theta_int[i] = 0 + i *  Delta_Theta_corona;
-	});
-	parallel_for(0, N_grids, [=](int i)
-	{
-		T_irr[i] = 0;
-	});
-	parallel_for(0, N_grids - 1, [=](int i)
-	{
-		parallel_for(0, N_corona, [=](int n)
-		{
-			bool Shadow = false;
-			parallel_for(0, i + 1, [=, &Shadow](int j)
-			{
-				if (atan((H[i + 1] - R_corona * sin(Theta_int[n])) / (R[i + 1] - R_corona * cos(Theta_int[n])))
-					<
-					atan((H[j] -	 R_corona * sin(Theta_int[n])) / (R[j] -	 R_corona * cos(Theta_int[n]))))
-				{
-					Shadow = true;
-				}
-			});
-
-			if (!Shadow && R[i + 1] > R_corona)
-			{
-				//double C = nu * (1 - epsilon)*((H[i + 1] - H[i]) / (R[i + 1] - R[i]) - H[i + 1] / R[i + 1]);
-				//double C = nu * 1e-3;/* nu * (1 - epsilon) * (2. / 35.)*(H[i + 1] / R[i + 1]); // lasota (2014)*/
-				
-				double R_2 = pow(H[i + 1], 2) + pow(R[i + 1], 2);	// square of radial coordinate of disk element
-				double Theta = atan(H[i + 1] / R[i + 1]);			// elevation of disk element
-				double d_2 = pow(R_corona, 2) + R_2 + 2 * R_corona * sqrt(R_2) * cos(Theta_int[n] - Theta);	// square of distance between corona element and disk element
-				
-				double L_p = L * sin(Theta_int[n]) * Delta_Theta_corona * 0.5;								// luminosity of corona element
-
-				double beta_prime = acos((d_2 + R_2 - pow(R_corona, 2)) / (2 * sqrt(d_2 * R_2)));			
-				double slope_angle = atan((H[i + 1] - H[i]) / (R[i + 1] / R[i]));
-				double beta = beta_prime + slope_angle - Theta;												// viewing angle of corona
-
-				double L_disk = L_p / (4 * PI * d_2) * sin(beta);
-				if (L > 0)
-				{
-						T_irr[i + 1] += pow(L_disk / a, 0.25);
-				}
-				else
-					T_irr[i + 1] += 0;
-			}
-			else
-			{
-				T_irr[i + 1] += 0;
-			}
-		});
-	});
-}
-
-void GetShadows(int* Shadows, double* R, double* H, double R_corona, double Theta_corona)
+void GetShadows(vector<int> &Shadows, vector<double> R, vector<double> H, double R_corona, double Theta_corona)
 {
 	Shadows[0] = 0;
-	parallel_for(0, N_grids - 1, [=](int i)
+	parallel_for(0, N_grids - 1, [=, &Shadows](int i)
 	{
 		int n = 0;
-		parallel_for(0, i + 1, [=, &n](int j)
+		for (int j = 0; j < i + 1; j++)
 		{
 			if (atan((H[i + 1] - R_corona * sin(Theta_corona)) / abs(R[i + 1] - R_corona * cos(Theta_corona))) <
-				atan((H[j] -     R_corona * sin(Theta_corona)) / abs(R[j]     - R_corona * cos(Theta_corona))))
+				atan((H[j] - R_corona * sin(Theta_corona)) / abs(R[j] - R_corona * cos(Theta_corona))))
 			{
 				n++;
-			}
-		});
-		if (n > 1)
+			}	
+		}
+		if (n > 3)
 		{
 			Shadows[i + 1] = 1;
 		}
@@ -906,38 +827,9 @@ void GetShadows(int* Shadows, double* R, double* H, double R_corona, double Thet
 	});
 }
 
-double* IrradiationTemperaturePower_4(int N_grids, double nu, double epsilon, double L, double* R, double* H)
-{
-
-	double* T_irr = new double[N_grids];
-	parallel_for(0, N_grids - 1, [=](int i)
-	{
-		double C = nu * (1 - epsilon)*((H[i + 1] - H[i]) / (R[i + 1] - R[i]) - H[i] / R[i]);
-		T_irr[i] = C * L / (4 * PI * a * R[i]);
-	});
-	return T_irr;
-}
-
 double eVtoHz(double eV)
 {
 	return 2.417990504024e+14 * eV; // not sure...
-}
-
-double alpha(double T)
-{
-	if (T > 10000)
-		return alpha_hot;
-	else return alpha_cold;
-}
-
-void alpha(double* Alpha, double* T)
-{
-	parallel_for(0, N_grids, [=](int i)
-	{
-		if (T[i] > 10000)
-			Alpha[i] =  alpha_hot;
-		else Alpha[i] = alpha_cold;
-	});
 }
 
 double mu_p(double alpha)
@@ -946,6 +838,7 @@ double mu_p(double alpha)
 		return mu_p_hot;
 	else return mu_p_cold;
 }
+
 int FindHotIndex(vector<double> vAlpha)
 {
 	int i;
@@ -958,6 +851,7 @@ int FindHotIndex(vector<double> vAlpha)
 	}
 	return N_grids - 1;
 }
+
 double VISC_C(double alpha, double opacity)
 {
 	double VIS_C = pow(
@@ -975,62 +869,6 @@ double average(double numbers[], int size) {
 			sum += numbers[i];
 	});
 	return sum / (double)size;
-}
-/*
- *  Dubus et. al. (2001)
- */
-double alpha_alternative(double T_c, double T_irr, double R)
-{
-	double v1 = T_c_max(T_irr, R);
-	double v2 = T_c_min(T_irr, R);
-	double v3 = irr_effect(T_irr);
-	double v4 = pow(R / 1e10, -0.05 * irr_effect(T_irr));
-	double v5 = pow(R / 1e10, 0.05 - 0.12 * irr_effect(T_irr));
-	double v6 = -0.05 * irr_effect(T_irr);
-	double v7 = 0.05 - 0.12 * irr_effect(T_irr);
-	double criticaltemp = T_critical(T_irr, R);
-	double power = pow(1 + pow(criticaltemp / T_c, 8), -1);
-	double calc = alpha_cold * pow((alpha_hot / alpha_cold), power);
-	if(calc > 0)
-		return calc;
-	else
-	{
-		//cout << "alpha = " << std::scientific << calc;
-		return alpha_hot;
-	}
-	if (T_c_max(T_irr, R) > T_c_min(T_irr, R))
-	{
-		return alpha_hot;
-	}
-	else
-		return alpha_cold;
-}
-
-void alpha_alternative(vector<double> vAlpha, vector<double> T_c, vector<double> T_irr, vector<double> R)
-{
-	parallel_for(0, N_grids, [=, &vAlpha](int i)
-	{
-		double criticaltemp = T_critical(T_irr[i], R[i]);
-		double power = pow(1 + pow(criticaltemp / T_c[i], 8), -1);
-		double calc = alpha_cold * pow((alpha_hot / alpha_cold), power);
-		if (calc > 0)
-			vAlpha[i] = calc;
-		else
-		{
-			vAlpha[i] = alpha_hot;
-		}
-	});
-}
-
-void alpha_compare(vector<double> vAlpha, vector<double> E, vector<double> T_irr, vector<double> R)
-{
-	parallel_for(0, N_grids, [=, &vAlpha](int i)
-	{
-		if (E[i] > E_max(T_irr[i], R[i]))
-			vAlpha[i] = alpha_hot;
-		if (E[i] < E_min(T_irr[i], R[i]))
-			vAlpha[i] = alpha_cold;
-	});
 }
 
 double T_critical(double T_irr, double R)
@@ -1060,16 +898,6 @@ double E_min(double T_irr, double R)
 {
 	return (8.3 - 7.1 * irr_effect(T_irr)) * pow(alpha_hot, -0.77) * pow(M_compact / M_solar, -0.37)
 		* pow(R / 1e10, 1.12 - 0.23 * irr_effect(T_irr));
-}
-
-double EffectiveTemperature_alternative(double M_dot, double R)
-{
-	if (M_dot > 0)
-	{
-		double T_isco = pow((3 * G * M_compact * M_dot) / (8 * PI * pow(R_isco, 3)) * a, 0.25);
-		return T_isco * pow(R / R_isco, -0.75) * pow((1 - pow(R_isco / R, 0.5)), 0.25);
-	}
-	else return 0;
 }
 
 double EffectiveTemperature_dubus2014(double E, double R, double V)
@@ -1122,17 +950,6 @@ void ScaleHeight_FrankKingRaine(double * H, double * E, double * T_c, double* M_
 	}
 }
 
-int FindTruncationIndex(double R_corona, double* R)
-{
-	for (int i = 0; i < N_grids; i++)
-	{
-		if (R[i] > R_corona)
-		{
-			return i;
-		}
-	}
-}
-
 double TimeDependentCoronaRadius(double T_current, double T_corona, double T_rise, double R_initial, double R_max, bool Formed)
 {
 	if (Formed)
@@ -1148,20 +965,6 @@ double TimeDependentCoronaRadius(double T_current, double T_corona, double T_ris
 			return R_max;
 	}
 	else return R_isco;
-}
-
-void GetGAS_RADIATION_ratio(double* GvsR, double* E, double* H, double* Alpha, double* T_c)
-{
-	double* P_rad = new double[N_grids];
-	double* P_gas = new double[N_grids];
-
-	RadiationPressure(P_rad, T_c);
-	GasPressure(P_gas, E, H, T_c, Alpha);
-
-	parallel_for(0, N_grids, [=](int i)
-	{
-		GvsR[i] = P_rad[i] / P_gas[i];
-	});
 }
 
 void printmatrix(vector<vector<double>> matrix, int rows, int columns)

@@ -1,7 +1,10 @@
 set xlabel "Radius (cm)"
-set ylabel "Irradiation Temperature(K)"
-
-set logscale y
-set logscale x
-
-plot for [i=0:100:2] "TirrvsR.txt" every :1::i::i
+set ylabel "Time (days)"
+set zlabel "Irradiation Temperature(K)" rotate parallel
+#set hidden3d
+set logscale xyz
+set grid
+unset logscale yx
+#set pm3d at st
+#set logscale cb
+splot "TirrvsR.txt" using 2:1:3 with lines
