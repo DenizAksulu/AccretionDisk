@@ -481,7 +481,7 @@ int main(int argc, char **argv)
 				{
 					E[l] = S_new[l] / X[l];
 					T_eff[l] = EffectiveTemperature_dubus2014(E[l], R[l], V_new[l]);
-					T_c[l] = CentralTemperature_dubus2014(OpticalThickness(E[l], O[l]), T_eff[l], 0);
+					T_c[l] = CentralTemperature_dubus2014(OpticalThickness(E[l], O[l]), T_eff[l], T_irr[l]);
 
 					if (T_c[l] > T_c_max(T_irr[l], R[l]) && Alpha[l] == alpha_cold)
 						Alpha[l] = alpha_hot;
@@ -785,8 +785,10 @@ double GetLuminosity(vector<double> T, vector<double> X, double minEnergyEV, dou
 void IrradiationTemperature_CentralPointSource(double LUMINOSITY, vector<double> R, vector<double> H, vector<double> &T_irr, bool ShadowEnabled)
 {
 	vector<int> Shadows(N_grids, 0);
-	if(ShadowEnabled)
+	if (ShadowEnabled)
 		GetShadows(Shadows, R, H, 0, 0);									// Get shadows 
+	else
+		LUMINOSITY = 10 * LUMINOSITY;										// Increase luminosity if corona has been formed
 	
 	parallel_for(0, N_grids - 1, [=, &T_irr](int i)
 	{
