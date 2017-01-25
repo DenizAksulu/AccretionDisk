@@ -66,6 +66,7 @@ bool MaximumLuminosityReached = false;
 double R_Corona, Theta_Corona;
 int trunc_radius_index = 0;
 bool Diverging = false;
+int N_samples = 500;
 
 
 
@@ -102,6 +103,13 @@ double Viscosity(double T_c, double alpha, double H);
 void IrradiationTemperature_CentralPointSource(double LUMINOSITY, vector<double> R, vector<double> H, vector<double> &T_irr, bool ShadowEnabled);
 void GetShadows(vector<int> &Shadows, vector<double> R, vector<double> H, double R_corona, double Theta_corona);
 
+void ProduceAnalyticalSolutions(double M_disk, double J_disk);
+
+enum simulation_type {full, thompson_opacity, analytical};
+simulation_type s_type = full;
+
+bool EnableIrradiation = false;
+bool EnableCoronaFormation = false;
 
 int main(int argc, char **argv)
 {
@@ -147,15 +155,55 @@ int main(int argc, char **argv)
 	cout << "Eddington Luminosity       = " << L_edd << " erg s-1.\n";
 	if (argc == 1)
 	{
+		cout << "Simulation type? (f, t, a)"; // f = realistic opacities, t = tompson opacities, a = analytical
+		char type;
+		cin >> type;
+		switch (type)
+		{
+		case 'f':
+			s_type = full;
+			break;
+		case 't':
+			s_type = thompson_opacity;
+			break;
+		case 'a':
+			s_type = analytical;
+			break;
+		}
+		cout << "Enable irradiation? (y, n)";
+		cin >> type;
+		if (type == 'y')
+		{
+			EnableIrradiation = true;
+			cout << "Enable corona formation? (y, n)";
+			cin >> type;
+			if (type == 'y')
+			{
+				EnableCoronaFormation = true;
+			}
+			else
+				EnableCoronaFormation = false;
+		}
+		else
+			EnableIrradiation = false;
 		cout << "Please enter the number of grids for the radial coordinate.\n";
 		cin >> N_grids;
-		cout << "Please enter the time step in seconds.\n";
-		cin >> delta_T;
 	}
 	else
 	{
 		N_grids = stod(argv[8]);
 	}
+
+	if (argc == 1)
+	{
+		cout << "Please enter the evolution duration. (months)\n";
+		cin >> n; T_max = n*month;
+	}
+	else
+	{
+		T_max = stod(argv[9])*month;
+	}
+
 	cout << "Creating initial conditions...\n";
 
 	//**************************************************************************************************************
@@ -267,51 +315,67 @@ int main(int argc, char **argv)
 			T_eff[l] = EffectiveTemperature_dubus2014(E[l], R[l], V[l]);
 			T_c[l] = CentralTemperature_dubus2014(OpticalThickness(E[l], O[l]), T_eff[l],0);
 
-			if (T_c[l] > T_c_max(T_irr[l], R[l]) && Alpha[l] == alpha_cold)
-				Alpha[l] = alpha_hot;
-			if (T_c[l] < T_c_min(T_irr[l], R[l]) && Alpha[l] == alpha_hot)
-				Alpha[l] = alpha_cold;
+			if (s_type == full || s_type == thompson_opacity)
+			{
+				if (T_c[l] > T_c_max(T_irr[l], R[l]) && Alpha[l] == alpha_cold)
+					Alpha[l] = alpha_hot;
+				if (T_c[l] < T_c_min(T_irr[l], R[l]) && Alpha[l] == alpha_hot)
+					Alpha[l] = alpha_cold;
 
-			H[l] = sqrt((T_c[l] * k * pow(R[l], 3)) / (mu_p(Alpha[l]) * m_p * G * M_compact));
-			V[l] = Viscosity(T_c[l], Alpha[l], H[l]);
+				H[l] = sqrt((T_c[l] * k * pow(R[l], 3)) / (mu_p(Alpha[l]) * m_p * G * M_compact));
+				V[l] = Viscosity(T_c[l], Alpha[l], H[l]);
+			}
+			else if (s_type == analytical)
+			{
+				H[l] = sqrt((T_c[l] * k * pow(R[l], 3)) / (mu_p(Alpha[l]) * m_p * G * M_compact));
+				//************************************************************************
+				// Calculate viscosity ***************************************************
+				V[l] = VISC_C(Alpha[l], O[l]) * pow(X[l], (4. / 3.)) * pow(S[l], (2. / 3.));
+				//************************************************************************
+				//************************************************************************
+			}
+
 			V_new[l] = V[l];
 			S_new[l] = S[l];
 
-			// Find Opacity value*****************************************************
-			//************************************************************************
-			int a = 0, b = 0;
-			// 19 R values in the table
-			for (int m = 0; m < 19; m++)
+			if (s_type == full)
 			{
-				if (log10((E[l] / (2 * H[l])) / pow(T_c[l] * 1e-6, 3)) >= logR[18])
+				// Find Opacity value*****************************************************
+				//************************************************************************
+				int a = 0, b = 0;
+				// 19 R values in the table
+				for (int m = 0; m < 19; m++)
 				{
-					a = 18;
-					break;
+					if (log10((E[l] / (2 * H[l])) / pow(T_c[l] * 1e-6, 3)) >= logR[18])
+					{
+						a = 18;
+						break;
+					}
+					if (log10((E[l] / (2 * H[l])) / pow(T_c[l] * 1e-6, 3)) < logR[m])
+					{
+						a = m;
+						break;
+					}
 				}
-				if (log10((E[l] / (2 * H[l])) / pow(T_c[l] * 1e-6, 3)) < logR[m])
+				// 88 T values in the table
+				for (int n = 0; n < 88; n++)
 				{
-					a = m;
-					break;
+					if (log10(T_c[l]) >= logT[87])
+					{
+						b = 87;
+						break;
+					}
+					if (log10(T_c[l]) < logT[n])
+					{
+						b = n;
+						break;
+					}
 				}
-			}
-			// 88 T values in the table
-			for (int n = 0; n < 88; n++)
-			{
-				if (log10(T_c[l]) >= logT[87])
-				{
-					b = 87;
-					break;
-				}
-				if (log10(T_c[l]) < logT[n])
-				{
-					b = n;
-					break;
-				}
-			}
 
-			O[l] = pow(10, opacity[a][b]);
-			//************************************************************************
-			//************************************************************************
+				O[l] = pow(10, opacity[a][b]);
+				//************************************************************************
+				//************************************************************************
+			}
 		});
 	}
 	for (int i = 0; i < N_grids - 2; i++)
@@ -325,27 +389,22 @@ int main(int argc, char **argv)
 	M_total = 0;
 	for (int i = 0; i < N_grids; i++)
 	{
-		J_total += 4 * PI * sqrt(G * M_compact) * X[i] * S[i] * delta_X;
+		J_total += 4 * PI * sqrt(G * M_compact) * pow(X[i], 3) * S[i] * delta_X;
 		M_total += 4 * PI * S[i] * X[i] * X[i] * delta_X;
 	}
 
+	ProduceAnalyticalSolutions(M_total, J_total);
 	auto end = std::chrono::high_resolution_clock::now();
 	auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-	cout << "Initial conditions created in " <<	elapsed.count() << " ms.\n";
+	cout << "Initial conditions created and analytical solutions produced in " <<	elapsed.count() << " ms.\n";
 	cout << "Total angular momentum is " << J_total << " g cm2 s-1.\n";
 	cout << "Total mass is " << M_total << " g.\n";
 	//********************************************************************
 	//********************************************************************
+
+	cout << "Please enter the time step in seconds.\n";
+	cin >> delta_T;
 	
-	if (argc == 1)
-	{
-		cout << "Please enter the evolution duration. (months)\n";
-		cin >> n; T_max = n*month;
-	}
-	else
-	{
-		T_max = stod(argv[9])*month;
-	}
 
 	//*************************************************************************************************************
 	// Save initial conditions ************************************************************************************
@@ -394,8 +453,6 @@ int main(int argc, char **argv)
 	file_Rhot.close();
 	//*************************************************************************************************************
 	//*************************************************************************************************************
-
-	int N_samples = 500;
 	int s = 1;
 	start = chrono::high_resolution_clock::now(); // Start high resolution clock for time measurement
 	int time_index = 0;			// time index
@@ -473,7 +530,7 @@ int main(int argc, char **argv)
 			//*******************************************************************************************************************************
 			for (int m = 0; m < 4; m++)
 			{
-				if (MaximumLuminosityReached)
+				if (MaximumLuminosityReached && EnableIrradiation)
 				{
 					IrradiationTemperature_CentralPointSource(L_instant, R, H, T_irr, !CoronaFormed);					// Start irradiation
 				}
@@ -483,49 +540,63 @@ int main(int argc, char **argv)
 					T_eff[l] = EffectiveTemperature_dubus2014(E[l], R[l], V_new[l]);
 					T_c[l] = CentralTemperature_dubus2014(OpticalThickness(E[l], O[l]), T_eff[l], T_irr[l]);
 
-					if (T_c[l] > T_c_max(T_irr[l], R[l]) && Alpha[l] == alpha_cold)
-						Alpha[l] = alpha_hot;
-					if (T_c[l] < T_c_min(T_irr[l], R[l]) && Alpha[l] == alpha_hot)
-						Alpha[l] = alpha_cold;
-
-					H[l] = sqrt((T_c[l] * k * pow(R[l], 3)) / (mu_p(Alpha[l]) * m_p * G * M_compact));
-					V_new[l] = Viscosity(T_c[l], Alpha[l], H[l]);
-
-					// Find Opacity value*****************************************************
-					//************************************************************************
-					int a = 0, b = 0;
-					// 19 R values in the table
-					for (int m = 0; m < 19; m++)
+					if (s_type != analytical)
 					{
-						if (log10((E[l] / (2 * H[l])) / pow(T_c[l] * 1e-6, 3)) >= logR[18])
-						{
-							a = 18;
-							break;
-						}
-						if (log10((E[l] / (2 * H[l])) / pow(T_c[l] * 1e-6, 3)) < logR[m])
-						{
-							a = m;
-							break;
-						}
-					}
-					// 88 T values in the table
-					for (int n = 0; n < 88; n++)
-					{
-						if (log10(T_c[l]) >= logT[87])
-						{
-							b = 87;
-							break;
-						}
-						if (log10(T_c[l]) < logT[n])
-						{
-							b = n;
-							break;
-						}
-					}
+						if (T_c[l] > T_c_max(T_irr[l], R[l]) && Alpha[l] == alpha_cold)
+							Alpha[l] = alpha_hot;
+						if (T_c[l] < T_c_min(T_irr[l], R[l]) && Alpha[l] == alpha_hot)
+							Alpha[l] = alpha_cold;
 
-					O[l] = pow(10, opacity[a][b]);
-					//************************************************************************
-					//************************************************************************
+						H[l] = sqrt((T_c[l] * k * pow(R[l], 3)) / (mu_p(Alpha[l]) * m_p * G * M_compact));
+						V_new[l] = Viscosity(T_c[l], Alpha[l], H[l]);
+					}
+					else
+					{
+						H[l] = sqrt((T_c[l] * k * pow(R[l], 3)) / (mu_p(Alpha[l]) * m_p * G * M_compact));
+						//************************************************************************
+						// Calculate viscosity ***************************************************
+						V_new[l] = VISC_C(Alpha[l], O[l]) * pow(X[l], (4. / 3.)) * pow(S_new[l], (2. / 3.));
+						//************************************************************************
+						//************************************************************************
+					}
+					if (s_type == full)
+					{
+						// Find Opacity value*****************************************************
+						//************************************************************************
+						int a = 0, b = 0;
+						// 19 R values in the table
+						for (int m = 0; m < 19; m++)
+						{
+							if (log10((E[l] / (2 * H[l])) / pow(T_c[l] * 1e-6, 3)) >= logR[18])
+							{
+								a = 18;
+								break;
+							}
+							if (log10((E[l] / (2 * H[l])) / pow(T_c[l] * 1e-6, 3)) < logR[m])
+							{
+								a = m;
+								break;
+							}
+						}
+						// 88 T values in the table
+						for (int n = 0; n < 88; n++)
+						{
+							if (log10(T_c[l]) >= logT[87])
+							{
+								b = 87;
+								break;
+							}
+							if (log10(T_c[l]) < logT[n])
+							{
+								b = n;
+								break;
+							}
+						}
+
+						O[l] = pow(10, opacity[a][b]);
+						//************************************************************************
+						//************************************************************************
+					}
 				});
 			}
 			//*************************************************************************************************************************************************
@@ -552,16 +623,19 @@ int main(int argc, char **argv)
 
 		// Check if corona has been formed***************************************************************************************************************
 		//************************************************************************************************************************************************************
-		if (MaximumLuminosityReached && L_instant < 0.01 * L_edd && !CoronaFormed && T < T_corona)
+		if (EnableCoronaFormation)
 		{
-			CoronaFormed = true;
-			T_corona = T;
-			cout << "Corona formed at time T = " << T / day << " days.\n" << elapsed.count() << " ms have elapsed.\n\n";
-		}
-		else if (CoronaFormed && T > T_corona + 40 * day)
-		{
-			CoronaFormed = false;
-			cout << "Corona has vanished at time T = " << T / day << " days.\n" << elapsed.count() << " ms have elapsed.\n\n";
+			if (MaximumLuminosityReached && L_instant < 0.01 * L_edd && !CoronaFormed && T < T_corona)
+			{
+				CoronaFormed = true;
+				T_corona = T;
+				cout << "Corona formed at time T = " << T / day << " days.\n" << elapsed.count() << " ms have elapsed.\n\n";
+			}
+			else if (CoronaFormed && T > T_corona + 40 * day)
+			{
+				CoronaFormed = false;
+				cout << "Corona has vanished at time T = " << T / day << " days.\n" << elapsed.count() << " ms have elapsed.\n\n";
+			}
 		}
 		//************************************************************************************************************************************************************
 		//************************************************************************************************************************************************************
@@ -635,7 +709,7 @@ int main(int argc, char **argv)
 			M_total = 0;
 			for (int i = 0; i < N_grids; i++)
 			{
-				J_total += 4 * PI * sqrt(G * M_compact) * X[i] * S[i] * delta_X;
+				J_total += 4 * PI * sqrt(G * M_compact) * pow(X[i], 3) * S[i] * delta_X;
 				M_total += 4 * PI * S[i] * X[i] * X[i] * delta_X;
 			}
 			cout << "Current time is           " << T / day << " days.\n";
@@ -787,8 +861,8 @@ void IrradiationTemperature_CentralPointSource(double LUMINOSITY, vector<double>
 	vector<int> Shadows(N_grids, 0);
 	if (ShadowEnabled)
 		GetShadows(Shadows, R, H, 0, 0);									// Get shadows 
-	else
-		LUMINOSITY = 10 * LUMINOSITY;										// Increase luminosity if corona has been formed
+	//else
+		//LUMINOSITY = 10 * LUMINOSITY;										// Increase luminosity if corona has been formed
 	
 	parallel_for(0, N_grids - 1, [=, &T_irr](int i)
 	{
@@ -1002,4 +1076,65 @@ double SoundSpeed(double T_c, double alpha)
 double Viscosity(double T_c, double alpha, double H)
 {
 	return alpha * H * SoundSpeed(T_c, alpha);
+}
+
+void ProduceAnalyticalSolutions(double M_disk, double J_disk)
+{
+	double M_0 = M_disk;
+	double J_0 = J_disk;
+	
+	double p = 1, q = 2./3.;
+	double a_ = 1 + 1 / (5 * q - 2 * p + 4);
+	double k = pow(q / ((4 * q - 2 * p + 4)* (5 * q - 2 * p + 4)), 1 / q);
+	double beta = tgamma((q + 1) / q) * tgamma((5 * q - 2 * p + 5) / (4 * q - 2 * p + 4)) / 
+		tgamma((5 * q - 2 * p + 5) / (4 * q - 2 * p + 4) + (q + 1) / q);
+
+	double gamma1 = k * (q + 1) / (4 * q - 2 * p + 4) * beta;
+	double gamma2 = k * q / (4 * q - 2 * p + 4);
+
+	double r_0 = pow(J_0 / M_0, 2) / (G * M_compact) * pow(gamma2 / gamma1, 2);
+	double E_0 = M_0 / (4 * PI * r_0 * r_0 * gamma2);
+	double v_0 = VISC_C(alpha_hot, thompson / m_p) * pow(r_0, p) * pow(E_0, q);
+	double t_0 = 4 * r_0 * r_0 / (3 * v_0);
+
+	double* time_array = new double[N_samples];
+	vector<double> R(N_grids, 0);											// Surface mass density
+	vector<double> E(N_grids, 0);											// Surface mass density
+	double time_step = T_max / N_samples;
+	double grid_step = X_outer / N_grids;
+	parallel_for(0, N_samples, [=](int i)
+	{
+		time_array[i] = time_step * (i + 1);
+	});
+	parallel_for(0, N_grids, [=, &R, &E](int i) 
+	{
+		R[i] = pow(X_isco + i * grid_step, 2);
+		E[i] = E_0 * (k * pow(R[i] / r_0, -p / (q + 1)) * pow(1 - pow(R[i] / r_0, 2 - p / (q + 1)), 1 / q));
+	});
+	
+	ofstream file;
+	file.open("lightcurve_analytic.txt", ios::out);
+	file << 0 / day << "\t" << 0.1 * (G * M_compact) / (2 * R_isco) * 
+		(a_ - 1) * M_0 / t_0 << "\n";						// Write luminosity to file
+	file.close();
+
+	WriteGraphData(R, E, 0, N_grids, "EvsR_analytic.txt", false);
+
+	for (int i = 0; i < N_samples; i++)
+	{
+		double R_out = r_0 * pow(1 + time_array[i] / t_0, 2 / (5 * q - 2 * p + 4));
+
+		parallel_for(0, N_grids, [=, &R, &E](int j)
+		{
+			E[j] = E_0 * k * pow(1 + time_array[i] / t_0, 5 / (5 * q - 2 * p + 4))
+				* pow(R[j] / R_out, -p / (q + 1)) * pow(1 - pow(R[j] / R_out, 2 - p / (q + 1)), 1 / q);
+		});
+
+		file.open("lightcurve_analytic.txt", ios::app);
+		file << time_array[i] / day << "\t" << 0.1 * (G * M_compact) / (2 * R_isco) * 
+			(a_ - 1) * M_0 / t_0 * pow(1 + time_array[i] / t_0, -1 * a_) << "\n";		// Write luminosity to file
+		file.close();
+		WriteGraphData(R, E, time_array[i], N_grids, "EvsR_analytic.txt", true);
+	}
+
 }
