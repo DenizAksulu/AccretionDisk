@@ -109,6 +109,7 @@ enum simulation_type {full, thompson_opacity, analytical};
 simulation_type s_type = full;
 
 bool EnableIrradiation = false;
+bool ProduceAnalytical = false;
 bool EnableCoronaFormation = false;
 
 int main(int argc, char **argv)
@@ -169,6 +170,16 @@ int main(int argc, char **argv)
 		case 'a':
 			s_type = analytical;
 			break;
+		}
+		cout << "Produce analytical solution? (y, n)";
+		cin >> type;
+		if (type == 'y')
+		{
+			ProduceAnalytical = true;
+		}
+		else
+		{
+			ProduceAnalytical = false;
 		}
 		cout << "Enable irradiation? (y, n)";
 		cin >> type;
@@ -275,6 +286,8 @@ int main(int argc, char **argv)
 	
 	double Mu = 5e10; // cm
 	double Sigma = 1e10; // 1e10 previously
+	cout << "Maximum of the initial gaussian is at " << Mu << " cm.\n";
+	cout << "Sigma of the initial gaussian is " << Sigma << " cm.\n";
 	double E_0 = NormalizationGaussian(Mu, Sigma, R_isco, R_outer, M_disk);
 
 	parallel_for(0, N_grids, [=, &E, &S, &O, &Alpha, &X, &R, &V](int i)
@@ -285,7 +298,7 @@ int main(int argc, char **argv)
 		S[i] = X[i] * E[i];															// Calculate initial S values
 
 		O[i] = thompson / m_p;													// Calculate initial opacity values
-		Alpha[i] = alpha_hot;													// Initial Alpha parameter values (alpha_hot)
+		Alpha[i] = alpha_cold;													// Initial Alpha parameter values (alpha_hot)
 		
 		//************************************************************************
 		// Calculate viscosity ***************************************************
@@ -393,19 +406,6 @@ int main(int argc, char **argv)
 		M_total += 4 * PI * S[i] * X[i] * X[i] * delta_X;
 	}
 
-	ProduceAnalyticalSolutions(M_total, J_total);
-	auto end = std::chrono::high_resolution_clock::now();
-	auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-	cout << "Initial conditions created and analytical solutions produced in " <<	elapsed.count() << " ms.\n";
-	cout << "Total angular momentum is " << J_total << " g cm2 s-1.\n";
-	cout << "Total mass is " << M_total << " g.\n";
-	//********************************************************************
-	//********************************************************************
-
-	cout << "Please enter the time step in seconds.\n";
-	cin >> delta_T;
-	
-
 	//*************************************************************************************************************
 	// Save initial conditions ************************************************************************************
 	vector<int> Shadows(N_grids, 0);
@@ -422,6 +422,22 @@ int main(int argc, char **argv)
 	WriteGraphData(R, O, 0, N_grids, "OvsR.txt", false);
 	//*************************************************************************************************************
 	//*************************************************************************************************************
+
+	if(ProduceAnalytical)
+		ProduceAnalyticalSolutions(M_total, J_total);
+	auto end = std::chrono::high_resolution_clock::now();
+	auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+	cout << "Initial conditions created and analytical solutions produced in " <<	elapsed.count() << " ms.\n";
+	cout << "Total angular momentum is " << J_total << " g cm2 s-1.\n";
+	cout << "Total mass is " << M_total << " g.\n";
+	cout << "Specific angular momentum is " << J_total / M_total << " cm2 s-1.\n";
+	//********************************************************************
+	//********************************************************************
+
+	cout << "Please enter the time step in seconds.\n";
+	cin >> delta_T;
+	
+
 
 	//*************************************************************************************************************
 	// File operations ********************************************************************************************
@@ -1082,7 +1098,9 @@ void ProduceAnalyticalSolutions(double M_disk, double J_disk)
 {
 	double M_0 = M_disk;
 	double J_0 = J_disk;
-	
+
+	double alpha = alpha_cold;
+
 	double p = 1, q = 2./3.;
 	double a_ = 1 + 1 / (5 * q - 2 * p + 4);
 	double k = pow(q / ((4 * q - 2 * p + 4)* (5 * q - 2 * p + 4)), 1 / q);
@@ -1094,22 +1112,54 @@ void ProduceAnalyticalSolutions(double M_disk, double J_disk)
 
 	double r_0 = pow(J_0 / M_0, 2) / (G * M_compact) * pow(gamma2 / gamma1, 2);
 	double E_0 = M_0 / (4 * PI * r_0 * r_0 * gamma2);
-	double v_0 = VISC_C(alpha_hot, thompson / m_p) * pow(r_0, p) * pow(E_0, q);
+	double v_0 = VISC_C(alpha, thompson / m_p) * pow(r_0, p) * pow(E_0, q);
 	double t_0 = 4 * r_0 * r_0 / (3 * v_0);
+
 
 	double* time_array = new double[N_samples];
 	vector<double> R(N_grids, 0);											// Surface mass density
 	vector<double> E(N_grids, 0);											// Surface mass density
+	vector<double> T_c(N_grids, 0);											// Surface mass density
+	vector<double> T_eff(N_grids, 0);											// Surface mass density
+	vector<double> V(N_grids, 0);											// Surface mass density
+	vector<double> Tc_max(N_grids, 0);											// Surface mass density
+	vector<double> Tc_min(N_grids, 0);											// Surface mass density
 	double time_step = T_max / N_samples;
 	double grid_step = X_outer / N_grids;
+
+	cout << "In T = " << T_max / month << " months the disk will extend to " << r_0 * pow(1 + T_max / t_0, 2 / (5 * q - 2 * p + 4)) << " cm.\n";
+
 	parallel_for(0, N_samples, [=](int i)
 	{
 		time_array[i] = time_step * (i + 1);
 	});
-	parallel_for(0, N_grids, [=, &R, &E](int i) 
+	parallel_for(0, N_grids, [=, &R, &E, &V, &T_c, &T_eff, &Tc_max, &Tc_min](int i)
 	{
 		R[i] = pow(X_isco + i * grid_step, 2);
 		E[i] = E_0 * (k * pow(R[i] / r_0, -p / (q + 1)) * pow(1 - pow(R[i] / r_0, 2 - p / (q + 1)), 1 / q));
+		//************************************************************************
+		// Calculate viscosity ***************************************************
+		V[i] = VISC_C(alpha, thompson / m_p) * pow(R[i], p) * pow(E[i], q);
+		//************************************************************************
+		//************************************************************************
+		T_eff[i] = EffectiveTemperature_dubus2014(E[i], R[i], V[i]);
+		T_c[i] = CentralTemperature_dubus2014(OpticalThickness(E[i], thompson / m_p), T_eff[i], 0);
+
+		Tc_max[i] = T_c_max(0, R[i]);											
+		Tc_min[i] = T_c_min(0, R[i]);
+
+		if (isnan(E[i]))
+			E[i] = 0;
+		if (isnan(V[i]))
+			V[i] = 0;
+		if (isnan(T_eff[i]))
+			T_eff[i] = 0;
+		if (isnan(T_c[i]))
+			T_c[i] = 0;
+		if (isnan(Tc_max[i]))
+			Tc_max[i] = 0;
+		if (isnan(Tc_min[i]))
+			Tc_min[i] = 0;
 	});
 	
 	ofstream file;
@@ -1119,22 +1169,53 @@ void ProduceAnalyticalSolutions(double M_disk, double J_disk)
 	file.close();
 
 	WriteGraphData(R, E, 0, N_grids, "EvsR_analytic.txt", false);
+	WriteGraphData(R, V, 0, N_grids, "V_analytic.txt", false);
+	WriteGraphData(R, T_c, 0, N_grids, "Tc_analytic.txt", false);
+	WriteGraphData(R, T_eff, 0, N_grids, "Teff_analytic.txt", false);
+	WriteGraphData(R, Tc_max, 0, N_grids, "Tcmax.txt", false);
+	WriteGraphData(R, Tc_min, 0, N_grids, "Tcmin.txt", false);
 
 	for (int i = 0; i < N_samples; i++)
 	{
 		double R_out = r_0 * pow(1 + time_array[i] / t_0, 2 / (5 * q - 2 * p + 4));
 
-		parallel_for(0, N_grids, [=, &R, &E](int j)
+		parallel_for(0, N_grids, [=, &R, &E, &V, &T_c, &T_eff, &Tc_max, &Tc_min](int j)
 		{
-			E[j] = E_0 * k * pow(1 + time_array[i] / t_0, 5 / (5 * q - 2 * p + 4))
+			E[j] = E_0 * k * pow(1 + time_array[i] / t_0, -5 / (5 * q - 2 * p + 4))
 				* pow(R[j] / R_out, -p / (q + 1)) * pow(1 - pow(R[j] / R_out, 2 - p / (q + 1)), 1 / q);
+			//************************************************************************
+			// Calculate viscosity ***************************************************
+			V[j] = VISC_C(alpha, thompson / m_p) * pow(R[j], p) * pow(E[j], q);
+			//************************************************************************
+			//************************************************************************
+			T_eff[j] = EffectiveTemperature_dubus2014(E[j], R[j], V[j]);
+			T_c[j] = CentralTemperature_dubus2014(OpticalThickness(E[j], thompson / m_p), T_eff[j], 0);
+			Tc_max[j] = T_c_max(0, R[j]);
+			Tc_min[j] = T_c_min(0, R[j]);
+			if (isnan(E[j]))
+				E[j] = 0;
+			if (isnan(V[j]))
+				V[j] = 0;
+			if (isnan(T_eff[j]))
+				T_eff[j] = 0;
+			if (isnan(T_c[j]))
+				T_c[j] = 0;
+			if (isnan(Tc_max[j]))
+				Tc_max[j] = 0;
+			if (isnan(Tc_min[j]))
+				Tc_min[j] = 0;
 		});
 
 		file.open("lightcurve_analytic.txt", ios::app);
 		file << time_array[i] / day << "\t" << 0.1 * (G * M_compact) / (2 * R_isco) * 
 			(a_ - 1) * M_0 / t_0 * pow(1 + time_array[i] / t_0, -1 * a_) << "\n";		// Write luminosity to file
 		file.close();
+		WriteGraphData(R, V, time_array[i], N_grids, "V_analytic.txt", true);
+		WriteGraphData(R, T_c, time_array[i], N_grids, "Tc_analytic.txt", true);
+		WriteGraphData(R, T_eff, time_array[i], N_grids, "Teff_analytic.txt", true);
 		WriteGraphData(R, E, time_array[i], N_grids, "EvsR_analytic.txt", true);
+		WriteGraphData(R, Tc_max, time_array[i], N_grids, "Tcmax.txt", true);
+		WriteGraphData(R, Tc_min, time_array[i], N_grids, "Tcmin.txt", true);
 	}
 
 }
