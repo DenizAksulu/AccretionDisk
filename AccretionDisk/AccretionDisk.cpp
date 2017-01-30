@@ -109,8 +109,10 @@ enum simulation_type {full, thompson_opacity, analytical};
 simulation_type s_type = full;
 
 bool EnableIrradiation = false;
+bool EnableShadows = false;
 bool ProduceAnalytical = false;
 bool EnableCoronaFormation = false;
+bool EnableCoronaVanishing = false;
 
 int main(int argc, char **argv)
 {
@@ -186,14 +188,33 @@ int main(int argc, char **argv)
 		if (type == 'y')
 		{
 			EnableIrradiation = true;
-			cout << "Enable corona formation? (y, n)";
+			cout << "Enable shadows? (y, n)";
 			cin >> type;
-			if (type == 'y')
+			if (type == 'n')
 			{
-				EnableCoronaFormation = true;
+				EnableShadows = false;
 			}
 			else
-				EnableCoronaFormation = false;
+			{
+				EnableShadows = true;
+				cout << "Enable corona formation? (y, n)";
+				cin >> type;
+				if (type == 'y')
+				{
+					EnableCoronaFormation = true;
+
+					cout << "Enable corona vanishing? (y, n)";
+					cin >> type;
+					if (type == 'y')
+					{
+						EnableCoronaVanishing = true;
+					}
+					else
+						EnableCoronaVanishing = false;
+				}
+				else
+					EnableCoronaFormation = false;
+			}
 		}
 		else
 			EnableIrradiation = false;
@@ -548,7 +569,11 @@ int main(int argc, char **argv)
 			{
 				if (MaximumLuminosityReached && EnableIrradiation)
 				{
-					IrradiationTemperature_CentralPointSource(L_instant, R, H, T_irr, !CoronaFormed);					// Start irradiation
+					IrradiationTemperature_CentralPointSource(L_instant, R, H, T_irr, (!CoronaFormed));					// Start irradiation
+				}
+				if (MaximumLuminosityReached && EnableIrradiation && !EnableShadows)
+				{
+					IrradiationTemperature_CentralPointSource(L_instant, R, H, T_irr, EnableShadows);					// Start irradiation
 				}
 				parallel_for(0, N_grids, [=, &O, &H, &T_c, &T_eff, &V, &Alpha, &E, &S, &V_new](int l)
 				{
@@ -647,7 +672,7 @@ int main(int argc, char **argv)
 				T_corona = T;
 				cout << "Corona formed at time T = " << T / day << " days.\n" << elapsed.count() << " ms have elapsed.\n\n";
 			}
-			else if (CoronaFormed && T > T_corona + 40 * day)
+			else if (CoronaFormed && T > T_corona + 40 * day && EnableCoronaVanishing)
 			{
 				CoronaFormed = false;
 				cout << "Corona has vanished at time T = " << T / day << " days.\n" << elapsed.count() << " ms have elapsed.\n\n";
