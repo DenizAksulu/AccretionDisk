@@ -316,10 +316,11 @@ int main(int argc, char **argv)
 		X[i] = X_isco + i * delta_X;												// Determine grids in X space
 		R[i] = X[i] * X[i];															// Determine grids in R space
 		E[i] = E_0 * exp(-1 * (pow((R[i] - Mu), 2.)) / (2. * pow(Sigma, 2.)));		// Calculate initial gaussian mass distribution
+		if (E[i] <= 1e-100) E[i] = 1e-6;
 		S[i] = X[i] * E[i];															// Calculate initial S values
 
 		O[i] = thompson / m_p;													// Calculate initial opacity values
-		Alpha[i] = alpha_cold;													// Initial Alpha parameter values (alpha_hot)
+		Alpha[i] = alpha_hot;													// Initial Alpha parameter values (alpha_hot)
 		
 		//************************************************************************
 		// Calculate viscosity ***************************************************
@@ -333,8 +334,8 @@ int main(int argc, char **argv)
 	//*******************************************************************************************************************************
 	E[0]= 0;
 	S[0] = 0;
-	E[N_grids - 1] = 0;
-	S[N_grids - 1] = 0;
+	//E[N_grids - 1] = 0;
+	//S[N_grids - 1] = 0;
 	M_dot[N_grids - 1] = M_dot_N_grids;
 	M_dot[N_grids - 2] = M_dot_N_grids;
 	//*******************************************************************************************************************************
@@ -499,11 +500,11 @@ int main(int argc, char **argv)
 	{
 		// Determine outer boundary condition***************************************************************************************************************
 		//*************************************************************************************************************************************************
-		/*S[N_grids - 1] = pow(((M_dot[N_grids - 2] * delta_X / (3. * PI) + S[N_grids - 2] * V[N_grids - 2])
+		S[N_grids - 1] = pow(((M_dot[N_grids - 2] * delta_X / (3. * PI) + S[N_grids - 2] * V[N_grids - 2])
 			/ (VISC_C(Alpha[N_grids - 1], O[N_grids - 1]) * pow(X[N_grids - 1], (4. / 3.)))),
 			(3. / 5.));
 		V[N_grids - 1] = VISC_C(Alpha[N_grids - 1], O[N_grids - 1]) * pow(X[N_grids - 1], (4. / 3.)) 
-			* pow(S[N_grids - 1], (2. / 3.));*/
+			* pow(S[N_grids - 1], (2. / 3.));
 		//*************************************************************************************************************************************************
 		//*************************************************************************************************************************************************
 
@@ -517,7 +518,10 @@ int main(int argc, char **argv)
 				Coefficient_C[i] = -1 * k * V_new[i + 1];
 				Coefficient_B[i] = 1 + 2 * k * V_new[i];
 				Coefficient_A[i] = -1 * k * V_new[i - 1];
-				Coefficient_D[i] = (1 - 2 * k*V[i]) * S[i] + k * V[i - 1] * S[i - 1] + k * V[i + 1] * S[i + 1];
+				if (i == N_grids - 2)
+					Coefficient_D[i] = (1 - 2 * k*V[i]) * S[i] + k * V[i - 1] * S[i - 1] + k * V[i + 1] * S[i + 1] + k * V_new[i + 1] * S_new[i + 1];
+				else
+					Coefficient_D[i] = (1 - 2 * k*V[i]) * S[i] + k * V[i - 1] * S[i - 1] + k * V[i + 1] * S[i + 1];
 				/*if (Coefficient_B[i] <= abs(Coefficient_A[i]) + abs(Coefficient_C[i]) && !Diverging)
 				{
 					cout << "Simulation is diverging... Decreasing time step.\n";
@@ -644,7 +648,7 @@ int main(int argc, char **argv)
 			//*************************************************************************************************************************************************
 		}
 
-		parallel_for(1, N_grids - 1, [=, &V, &S, &E](int i)
+		parallel_for(0, N_grids, [=, &V, &S, &E](int i)
 		{
 			S[i] = S_new[i];
 			V[i] = V_new[i];
@@ -666,7 +670,7 @@ int main(int argc, char **argv)
 		//************************************************************************************************************************************************************
 		if (EnableCoronaFormation)
 		{
-			if (MaximumLuminosityReached && L_instant < 0.01 * L_edd && !CoronaFormed && T < T_corona)
+			if (MaximumLuminosityReached && L_instant < 0.003 * L_edd && !CoronaFormed && T < T_corona)
 			{
 				CoronaFormed = true;
 				T_corona = T;
@@ -1124,7 +1128,7 @@ void ProduceAnalyticalSolutions(double M_disk, double J_disk)
 	double M_0 = M_disk;
 	double J_0 = J_disk;
 
-	double alpha = alpha_cold;
+	double alpha = alpha_hot;
 
 	double p = 1, q = 2./3.;
 	double a_ = 1 + 1 / (5 * q - 2 * p + 4);
