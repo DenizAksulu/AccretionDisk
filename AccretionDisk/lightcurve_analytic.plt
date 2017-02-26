@@ -38,4 +38,4 @@ print V_C
 print (19./16. -1)* M_0 / t_0* 0.1 * G * M_c / (2*r)
 f(x) =  (19./16. -1)* M_0 / t_0 *(1 + (x * 8.64e4)/t_0)**( -19./16.) * 0.1 * G * M_c / (2*r)
 
-plot[:][1e33:] "lightcurve.txt" with lines, "lightcurve_irr_vanish.txt" with lines
+plot[:][1e33:] "lightcurve_analytic_0.033000.txt" with lines, "lightcurve_analytic_0.233000.txt" with lines, "lightcurve_analytic_0.363000.txt" with lines, "lightcurve_analytic_1.023000.txt" with lines

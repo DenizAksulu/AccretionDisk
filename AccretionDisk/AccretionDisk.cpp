@@ -53,7 +53,7 @@ static double T_max;
 static double T_L = 99999999999;
 static double L_instant = 0, L_BB = 0, L_HEXTE = 0, L_Optical = 0;
 static double L_previous = 0;
-static double alpha_hot = 0.1;
+static double alpha_hot = 0.2; // was 0.1 before
 static double alpha_cold = 0.033;
 static double opacity[19][88];
 static double logR[19] = { -8, -7.5, -7, -6.5, -6, -5.5, -5, -4.5, -4, -3.5, -3, -2.5, -2, -1.5, -1, -0.5, 0, 0.5, 1 };
@@ -101,6 +101,7 @@ void printmatrix(vector<vector<double>> matrix, int rows, int columns);
 void printmatrix(double* matrix, int rows);
 double Viscosity(double T_c, double alpha, double H);
 void IrradiationTemperature_CentralPointSource(double LUMINOSITY, vector<double> R, vector<double> H, vector<double> &T_irr, bool ShadowEnabled);
+void IrradiationTemperature(double LUMINOSITY, double R_corona, double Theta_corona, vector<double> R, vector<double> H, vector<double> &T_irr, bool ShadowEnabled);
 void GetShadows(vector<int> &Shadows, vector<double> R, vector<double> H, double R_corona, double Theta_corona);
 
 void ProduceAnalyticalSolutions(double M_disk, double J_disk);
@@ -573,7 +574,10 @@ int main(int argc, char **argv)
 			{
 				if (MaximumLuminosityReached && EnableIrradiation)
 				{
-					IrradiationTemperature_CentralPointSource(L_instant, R, H, T_irr, (!CoronaFormed));					// Start irradiation
+					if(!CoronaFormed)
+						IrradiationTemperature(L_instant, 3*R_g, 0, R, H, T_irr, true);					// Start irradiation
+					else
+						IrradiationTemperature(L_instant, 500*R_g, 90, R, H, T_irr, true);					// Start irradiation
 				}
 				if (MaximumLuminosityReached && EnableIrradiation && !EnableShadows)
 				{
@@ -581,7 +585,7 @@ int main(int argc, char **argv)
 				}
 				parallel_for(0, N_grids, [=, &O, &H, &T_c, &T_eff, &V, &Alpha, &E, &S, &V_new](int l)
 				{
-					E[l] = S_new[l] / X[l];
+					E[l] = S_new[l] / X[l];   
 					T_eff[l] = EffectiveTemperature_dubus2014(E[l], R[l], V_new[l]);
 					T_c[l] = CentralTemperature_dubus2014(OpticalThickness(E[l], O[l]), T_eff[l], T_irr[l]);
 
@@ -925,6 +929,38 @@ void IrradiationTemperature_CentralPointSource(double LUMINOSITY, vector<double>
 	});
 
 }
+void IrradiationTemperature(double LUMINOSITY, double R_corona, double Theta_corona, vector<double> R, vector<double> H, vector<double> &T_irr, bool ShadowEnabled)
+{
+	Theta_corona = Theta_corona / 180 * PI; // from degrees to radian
+	vector<int> Shadows(N_grids, 0);
+	if (ShadowEnabled)
+		GetShadows(Shadows, R, H, R_corona, Theta_corona);									// Get shadows 
+																			//else
+	if(R_corona > 5*R_g)
+		LUMINOSITY = 100 * LUMINOSITY;										// Increase luminosity if corona has been formed
+
+	parallel_for(0, N_grids - 1, [=, &T_irr](int i)
+	{
+		if (Shadows[i] == 0)
+		{
+			double d_2 = (R[i] - R_corona*cos(Theta_corona)) * (R[i] - R_corona*cos(Theta_corona)) + (H[i] - R_corona*sin(Theta_corona)) * (H[i] - R_corona*sin(Theta_corona));		// Distance from point source
+			double theta = atan((H[i + 1] - R_corona*sin(Theta_corona)) / (R[i + 1] - R_corona*cos(Theta_corona)));					// elevation of disk element
+			double tan_phi = (H[i + 1] - H[i]) / (R[i + 1] - R[i]);
+			double phi = atan(tan_phi);									// slope angle of disk element
+			
+			double lambda = Theta_corona - theta;
+			double psi = theta - phi + PI / 2;
+			double Flux_disk = abs(LUMINOSITY / (d_2 * 4 * PI) * cos(lambda) * cos(psi));
+			if (Flux_disk > 0)
+				T_irr[i] = pow((Flux_disk / a), 0.25);
+			else
+				T_irr[i] = 0;
+		}
+		else
+			T_irr[i] = 0;
+	});
+
+}
 
 void GetShadows(vector<int> &Shadows, vector<double> R, vector<double> H, double R_corona, double Theta_corona)
 {
@@ -1127,124 +1163,128 @@ void ProduceAnalyticalSolutions(double M_disk, double J_disk)
 {
 	double M_0 = M_disk;
 	double J_0 = J_disk;
-
-	double alpha = alpha_hot;
-
-	double p = 1, q = 2./3.;
-	double a_ = 1 + 1 / (5 * q - 2 * p + 4);
-	double k = pow(q / ((4 * q - 2 * p + 4)* (5 * q - 2 * p + 4)), 1 / q);
-	double beta = tgamma((q + 1) / q) * tgamma((5 * q - 2 * p + 5) / (4 * q - 2 * p + 4)) / 
-		tgamma((5 * q - 2 * p + 5) / (4 * q - 2 * p + 4) + (q + 1) / q);
-
-	double gamma1 = k * (q + 1) / (4 * q - 2 * p + 4) * beta;
-	double gamma2 = k * q / (4 * q - 2 * p + 4);
-
-	double r_0 = pow(J_0 / M_0, 2) / (G * M_compact) * pow(gamma2 / gamma1, 2);
-	double E_0 = M_0 / (4 * PI * r_0 * r_0 * gamma2);
-	double v_0 = VISC_C(alpha, thompson / m_p) * pow(r_0, p) * pow(E_0, q);
-	double t_0 = 4 * r_0 * r_0 / (3 * v_0);
-
-
-	double* time_array = new double[N_samples];
-	vector<double> R(N_grids, 0);											// Surface mass density
-	vector<double> E(N_grids, 0);											// Surface mass density
-	vector<double> T_c(N_grids, 0);											// Surface mass density
-	vector<double> T_eff(N_grids, 0);											// Surface mass density
-	vector<double> V(N_grids, 0);											// Surface mass density
-	vector<double> Tc_max(N_grids, 0);											// Surface mass density
-	vector<double> Tc_min(N_grids, 0);											// Surface mass density
-	double time_step = T_max / N_samples;
-	double grid_step = X_outer / N_grids;
-
-	cout << "In T = " << T_max / month << " months the disk will extend to " << r_0 * pow(1 + T_max / t_0, 2 / (5 * q - 2 * p + 4)) << " cm.\n";
-
-	parallel_for(0, N_samples, [=](int i)
+	for (int m = 0; m < 100; m++)
 	{
-		time_array[i] = time_step * (i + 1);
-	});
-	parallel_for(0, N_grids, [=, &R, &E, &V, &T_c, &T_eff, &Tc_max, &Tc_min](int i)
-	{
-		R[i] = pow(X_isco + i * grid_step, 2);
-		E[i] = E_0 * (k * pow(R[i] / r_0, -p / (q + 1)) * pow(1 - pow(R[i] / r_0, 2 - p / (q + 1)), 1 / q));
-		//************************************************************************
-		// Calculate viscosity ***************************************************
-		V[i] = VISC_C(alpha, thompson / m_p) * pow(R[i], p) * pow(E[i], q);
-		//************************************************************************
-		//************************************************************************
-		T_eff[i] = EffectiveTemperature_dubus2014(E[i], R[i], V[i]);
-		T_c[i] = CentralTemperature_dubus2014(OpticalThickness(E[i], thompson / m_p), T_eff[i], 0);
+		double alpha = alpha_cold + m * 0.01;
 
-		Tc_max[i] = T_c_max(0, R[i]);											
-		Tc_min[i] = T_c_min(0, R[i]);
+		double p = 1, q = 2. / 3.;
+		double a_ = 1 + 1 / (5 * q - 2 * p + 4);
+		double k = pow(q / ((4 * q - 2 * p + 4)* (5 * q - 2 * p + 4)), 1 / q);
+		double beta = tgamma((q + 1) / q) * tgamma((5 * q - 2 * p + 5) / (4 * q - 2 * p + 4)) /
+			tgamma((5 * q - 2 * p + 5) / (4 * q - 2 * p + 4) + (q + 1) / q);
 
-		if (isnan(E[i]))
-			E[i] = 0;
-		if (isnan(V[i]))
-			V[i] = 0;
-		if (isnan(T_eff[i]))
-			T_eff[i] = 0;
-		if (isnan(T_c[i]))
-			T_c[i] = 0;
-		if (isnan(Tc_max[i]))
-			Tc_max[i] = 0;
-		if (isnan(Tc_min[i]))
-			Tc_min[i] = 0;
-	});
-	
-	ofstream file;
-	file.open("lightcurve_analytic.txt", ios::out);
-	file << 0 / day << "\t" << 0.1 * (G * M_compact) / (2 * R_isco) * 
-		(a_ - 1) * M_0 / t_0 << "\n";						// Write luminosity to file
-	file.close();
+		double gamma1 = k * (q + 1) / (4 * q - 2 * p + 4) * beta;
+		double gamma2 = k * q / (4 * q - 2 * p + 4);
 
-	WriteGraphData(R, E, 0, N_grids, "EvsR_analytic.txt", false);
-	WriteGraphData(R, V, 0, N_grids, "V_analytic.txt", false);
-	WriteGraphData(R, T_c, 0, N_grids, "Tc_analytic.txt", false);
-	WriteGraphData(R, T_eff, 0, N_grids, "Teff_analytic.txt", false);
-	WriteGraphData(R, Tc_max, 0, N_grids, "Tcmax.txt", false);
-	WriteGraphData(R, Tc_min, 0, N_grids, "Tcmin.txt", false);
+		double r_0 = pow(J_0 / M_0, 2) / (G * M_compact) * pow(gamma2 / gamma1, 2);
+		double E_0 = M_0 / (4 * PI * r_0 * r_0 * gamma2);
+		double v_0 = VISC_C(alpha, thompson / m_p) * pow(r_0, p) * pow(E_0, q);
+		double t_0 = 4 * r_0 * r_0 / (3 * v_0);
 
-	for (int i = 0; i < N_samples; i++)
-	{
-		double R_out = r_0 * pow(1 + time_array[i] / t_0, 2 / (5 * q - 2 * p + 4));
 
-		parallel_for(0, N_grids, [=, &R, &E, &V, &T_c, &T_eff, &Tc_max, &Tc_min](int j)
+		double* time_array = new double[N_samples];
+		vector<double> R(N_grids, 0);											// Surface mass density
+		vector<double> E(N_grids, 0);											// Surface mass density
+		vector<double> T_c(N_grids, 0);											// Surface mass density
+		vector<double> T_eff(N_grids, 0);											// Surface mass density
+		vector<double> V(N_grids, 0);											// Surface mass density
+		vector<double> Tc_max(N_grids, 0);											// Surface mass density
+		vector<double> Tc_min(N_grids, 0);											// Surface mass density
+		double time_step = T_max / N_samples;
+		double grid_step = X_outer / N_grids;
+
+		cout << "In T = " << T_max / month << " months the disk will extend to " << r_0 * pow(1 + T_max / t_0, 2 / (5 * q - 2 * p + 4)) << " cm.\n";
+
+		parallel_for(0, N_samples, [=](int i)
 		{
-			E[j] = E_0 * k * pow(1 + time_array[i] / t_0, -5 / (5 * q - 2 * p + 4))
-				* pow(R[j] / R_out, -p / (q + 1)) * pow(1 - pow(R[j] / R_out, 2 - p / (q + 1)), 1 / q);
+			time_array[i] = time_step * (i + 1);
+		});
+		parallel_for(0, N_grids, [=, &R, &E, &V, &T_c, &T_eff, &Tc_max, &Tc_min](int i)
+		{
+			R[i] = pow(X_isco + i * grid_step, 2);
+			E[i] = E_0 * (k * pow(R[i] / r_0, -p / (q + 1)) * pow(1 - pow(R[i] / r_0, 2 - p / (q + 1)), 1 / q));
 			//************************************************************************
 			// Calculate viscosity ***************************************************
-			V[j] = VISC_C(alpha, thompson / m_p) * pow(R[j], p) * pow(E[j], q);
+			V[i] = VISC_C(alpha, thompson / m_p) * pow(R[i], p) * pow(E[i], q);
 			//************************************************************************
 			//************************************************************************
-			T_eff[j] = EffectiveTemperature_dubus2014(E[j], R[j], V[j]);
-			T_c[j] = CentralTemperature_dubus2014(OpticalThickness(E[j], thompson / m_p), T_eff[j], 0);
-			Tc_max[j] = T_c_max(0, R[j]);
-			Tc_min[j] = T_c_min(0, R[j]);
-			if (isnan(E[j]))
-				E[j] = 0;
-			if (isnan(V[j]))
-				V[j] = 0;
-			if (isnan(T_eff[j]))
-				T_eff[j] = 0;
-			if (isnan(T_c[j]))
-				T_c[j] = 0;
-			if (isnan(Tc_max[j]))
-				Tc_max[j] = 0;
-			if (isnan(Tc_min[j]))
-				Tc_min[j] = 0;
+			T_eff[i] = EffectiveTemperature_dubus2014(E[i], R[i], V[i]);
+			T_c[i] = CentralTemperature_dubus2014(OpticalThickness(E[i], thompson / m_p), T_eff[i], 0);
+
+			Tc_max[i] = T_c_max(0, R[i]);
+			Tc_min[i] = T_c_min(0, R[i]);
+
+			if (isnan(E[i]))
+				E[i] = 0;
+			if (isnan(V[i]))
+				V[i] = 0;
+			if (isnan(T_eff[i]))
+				T_eff[i] = 0;
+			if (isnan(T_c[i]))
+				T_c[i] = 0;
+			if (isnan(Tc_max[i]))
+				Tc_max[i] = 0;
+			if (isnan(Tc_min[i]))
+				Tc_min[i] = 0;
 		});
 
-		file.open("lightcurve_analytic.txt", ios::app);
-		file << time_array[i] / day << "\t" << 0.1 * (G * M_compact) / (2 * R_isco) * 
-			(a_ - 1) * M_0 / t_0 * pow(1 + time_array[i] / t_0, -1 * a_) << "\n";		// Write luminosity to file
+		ofstream file;
+		char file_name[30];
+		sprintf(file_name, "lightcurve_analytic_%f.txt", alpha);
+		file.open(file_name, ios::out);
+		file << 0 / day << "\t" << 0.1 * (G * M_compact) / (2 * R_isco) *
+			(a_ - 1) * M_0 / t_0 << "\n";						// Write luminosity to file
 		file.close();
-		WriteGraphData(R, V, time_array[i], N_grids, "V_analytic.txt", true);
-		WriteGraphData(R, T_c, time_array[i], N_grids, "Tc_analytic.txt", true);
-		WriteGraphData(R, T_eff, time_array[i], N_grids, "Teff_analytic.txt", true);
-		WriteGraphData(R, E, time_array[i], N_grids, "EvsR_analytic.txt", true);
-		WriteGraphData(R, Tc_max, time_array[i], N_grids, "Tcmax.txt", true);
-		WriteGraphData(R, Tc_min, time_array[i], N_grids, "Tcmin.txt", true);
+
+		WriteGraphData(R, E, 0, N_grids, "EvsR_analytic.txt", false);
+		WriteGraphData(R, V, 0, N_grids, "V_analytic.txt", false);
+		WriteGraphData(R, T_c, 0, N_grids, "Tc_analytic.txt", false);
+		WriteGraphData(R, T_eff, 0, N_grids, "Teff_analytic.txt", false);
+		WriteGraphData(R, Tc_max, 0, N_grids, "Tcmax.txt", false);
+		WriteGraphData(R, Tc_min, 0, N_grids, "Tcmin.txt", false);
+
+		for (int i = 0; i < N_samples; i++)
+		{
+			double R_out = r_0 * pow(1 + time_array[i] / t_0, 2 / (5 * q - 2 * p + 4));
+
+			parallel_for(0, N_grids, [=, &R, &E, &V, &T_c, &T_eff, &Tc_max, &Tc_min](int j)
+			{
+				E[j] = E_0 * k * pow(1 + time_array[i] / t_0, -5 / (5 * q - 2 * p + 4))
+					* pow(R[j] / R_out, -p / (q + 1)) * pow(1 - pow(R[j] / R_out, 2 - p / (q + 1)), 1 / q);
+				//************************************************************************
+				// Calculate viscosity ***************************************************
+				V[j] = VISC_C(alpha, thompson / m_p) * pow(R[j], p) * pow(E[j], q);
+				//************************************************************************
+				//************************************************************************
+				T_eff[j] = EffectiveTemperature_dubus2014(E[j], R[j], V[j]);
+				T_c[j] = CentralTemperature_dubus2014(OpticalThickness(E[j], thompson / m_p), T_eff[j], 0);
+				Tc_max[j] = T_c_max(0, R[j]);
+				Tc_min[j] = T_c_min(0, R[j]);
+				if (isnan(E[j]))
+					E[j] = 0;
+				if (isnan(V[j]))
+					V[j] = 0;
+				if (isnan(T_eff[j]))
+					T_eff[j] = 0;
+				if (isnan(T_c[j]))
+					T_c[j] = 0;
+				if (isnan(Tc_max[j]))
+					Tc_max[j] = 0;
+				if (isnan(Tc_min[j]))
+					Tc_min[j] = 0;
+			});
+
+			file.open(file_name, ios::app);
+			file << time_array[i] / day << "\t" << 0.1 * (G * M_compact) / (2 * R_isco) *
+				(a_ - 1) * M_0 / t_0 * pow(1 + time_array[i] / t_0, -1 * a_) << "\n";		// Write luminosity to file
+			file.close();
+			WriteGraphData(R, V, time_array[i], N_grids, "V_analytic.txt", true);
+			WriteGraphData(R, T_c, time_array[i], N_grids, "Tc_analytic.txt", true);
+			WriteGraphData(R, T_eff, time_array[i], N_grids, "Teff_analytic.txt", true);
+			WriteGraphData(R, E, time_array[i], N_grids, "EvsR_analytic.txt", true);
+			WriteGraphData(R, Tc_max, time_array[i], N_grids, "Tcmax.txt", true);
+			WriteGraphData(R, Tc_min, time_array[i], N_grids, "Tcmin.txt", true);
+		}
 	}
 
 }
