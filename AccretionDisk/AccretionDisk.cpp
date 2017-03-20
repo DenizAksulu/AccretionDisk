@@ -1,18 +1,15 @@
-#include "stdafx.h"
+#include <cstdio>
 #include <fstream>
 #include <iostream>
-//#include <amp_math.h>
 #include <algorithm>
-//#include <amp.h>
-#include <ppl.h>
 #include <chrono>
 #include <sstream>
 #include <vector>
-#include <iomanip>      // std::setw
+#include <iomanip>
+#include <vector>
+#include <cmath>
 
 using namespace std;
-using namespace :: Concurrency;
-//using namespace ::Concurrency::fast_math;
 
 // CONSTANTS*******************************************************************
 static const double day = 86400e0;                                          // (day) s
@@ -72,32 +69,32 @@ int N_samples = 500;
 
 double OpticalThickness(double SurfaceDensity, double opacity);
 double NormalizationGaussian(double Mu, double Sigma, double R_isco, double R_outer, double M_disk);
-void WriteGraphData(double* X, double* Y, int length, string filename, bool append); 
+void WriteGraphData(double* X, double* Y, int length, string filename, bool append);
 void WriteGraphData(vector<double> X, vector<int> Y, double T, int length, string filename, bool append);
 double eVtoHz(double eV);
 void ExtractSpectrum(double* T, double* X, double delta_X, int N_grids, double minEnergyEV, double maxEnergyEV, double resolutionEV, bool append);
 double mu_p(double alpha);
 double VISC_C(double alpha, double opacity);
-double average(double numbers[], int size); 
+double average(double numbers[], int size);
 double T_critical(double T_irr, double R);
 double T_c_max(double T_irr, double R);
 double T_c_min(double T_irr, double R);
-double irr_effect(double T_irr); 
+double irr_effect(double T_irr);
 double BB_Luminosity(vector<double> T_eff, vector<double> X);
-double BB_Luminosity(double* T_eff, double* X, int truncation_index); 
+double BB_Luminosity(double* T_eff, double* X, int truncation_index);
 double GetLuminosity(vector<double> T, vector<double> X, double minEnergyEV, double maxEnergyEV, double resolutionEV);
 int FindHotIndex(vector<double> vAlpha);
 double EffectiveTemperature_dubus2014(double E, double R, double V);
 double CentralTemperature_dubus2014(double tau, double T_eff, double T_irr);
 double E_max(double T_irr, double R);
-double E_min(double T_irr, double R); 
+double E_min(double T_irr, double R);
 void RadiationPressure(double* P_rad, double* T_c);
-void GasPressure(double* P_gas, double* E, double* H, double* T_c, double* Alpha); 
+void GasPressure(double* P_gas, double* E, double* H, double* T_c, double* Alpha);
 void ScaleHeight_FrankKingRaine(double * H, double * E, double * T_c, double* M_dot, double* R, double* Alpha);
 double SoundSpeed(double T_c, double alpha);
 double TimeDependentCoronaRadius(double T_current, double T_corona, double T_rise, double R_initial, double R_max, bool Formed);
 void WriteGraphData(vector<double> X, vector<double> Y, double T, int length, string filename, bool append);
-void printmatrix(vector<vector<double>> matrix, int rows, int columns);
+void printmatrix(vector<vector<double> > matrix, int rows, int columns);
 void printmatrix(double* matrix, int rows);
 double Viscosity(double T_c, double alpha, double H);
 void IrradiationTemperature_CentralPointSource(double LUMINOSITY, vector<double> R, vector<double> H, vector<double> &T_irr, bool ShadowEnabled);
@@ -106,7 +103,7 @@ void GetShadows(vector<int> &Shadows, vector<double> R, vector<double> H, double
 
 void ProduceAnalyticalSolutions(double M_disk, double J_disk);
 
-enum simulation_type {full, thompson_opacity, analytical};
+enum simulation_type { full, thompson_opacity, analytical };
 simulation_type s_type = full;
 
 bool EnableIrradiation = false;
@@ -118,27 +115,18 @@ bool EnableCoronaVanishing = false;
 int main(int argc, char **argv)
 {
 	double n; // parameter for input
-	if (argc == 1)
-	{
-		cout << "Accretion disk simulation with parallel CPU computing.\n\n";
-		cout << "Please enter the mass of the compact object. (M_solar)\n";
-		cin >> n;
-		M_compact = n * M_solar;
-		cout << "Please enter the mass of the disk. (M_solar)\n";
-		cin >> n;
-		M_disk = n * M_solar;
-		cout << "Please enter the accretion rate. (M_solar s-1)\n";
-		cin >> n;
-		M_dot_N_grids = n * M_solar;
+	std::cout << "Accretion disk simulation with parallel CPU computing.\n\n";
+	std::cout << "Please enter the mass of the compact object. (M_solar)\n";
+	std::cin >> n;
+	M_compact = n * M_solar;
+	std::cout << "Please enter the mass of the disk. (M_solar)\n";
+	std::cin >> n;
+	M_disk = n * M_solar;
+	std::cout << "Please enter the accretion rate. (M_solar s-1)\n";
+	std::cin >> n;
+	M_dot_N_grids = n * M_solar;
 
-		R_g = 2 * G * M_compact / pow(c, 2);
-	}
-	else
-	{
-		M_compact = stod(argv[1]) * M_solar;
-		M_disk = stod(argv[2]) * M_solar;
-		M_dot_N_grids = stod(argv[3]) * M_solar;
-	}
+	R_g = 2 * G * M_compact / pow(c, 2);
 
 	// Calculate some initial values **************************************************************************
 	//*********************************************************************************************************
@@ -148,96 +136,84 @@ int main(int argc, char **argv)
 	X_outer = sqrt(R_outer);
 	L_edd = 1.3e38 * (M_compact / M_solar);
 	M_dot_edd = L_edd * 2 * R_isco / (G* M_compact);		// Luminosity in ergs/s
-	//*********************************************************************************************************
-	//*********************************************************************************************************
-	
-	cout << "Mass of the compact object = " << M_compact << " g.\n";
-	cout << "Mass of the disk           = " << M_disk << " g.\n";
-	cout << "Innermost stable orbit     = " << R_isco << " cm.\n";
-	cout << "Outer radius               = " << R_outer << " cm.\n";
-	cout << "Accretion rate             = " << M_dot_N_grids << " g s-1.\n";
-	cout << "Eddington Luminosity       = " << L_edd << " erg s-1.\n";
-	if (argc == 1)
+															//*********************************************************************************************************
+															//*********************************************************************************************************
+
+	std::cout << "Mass of the compact object = " << M_compact << " g.\n";
+	std::cout << "Mass of the disk           = " << M_disk << " g.\n";
+	std::cout << "Innermost stable orbit     = " << R_isco << " cm.\n";
+	std::cout << "Outer radius               = " << R_outer << " cm.\n";
+	std::cout << "Accretion rate             = " << M_dot_N_grids << " g s-1.\n";
+	std::cout << "Eddington Luminosity       = " << L_edd << " erg s-1.\n";
+
+	std::cout << "Simulation type? (f, t, a)"; // f = realistic opacities, t = tompson opacities, a = analytical
+	char type;
+	std::cin >> type;
+	switch (type)
 	{
-		cout << "Simulation type? (f, t, a)"; // f = realistic opacities, t = tompson opacities, a = analytical
-		char type;
-		cin >> type;
-		switch (type)
+	case 'f':
+		s_type = full;
+		break;
+	case 't':
+		s_type = thompson_opacity;
+		break;
+	case 'a':
+		s_type = analytical;
+		break;
+	}
+	std::cout << "Produce analytical solution? (y, n)";
+	std::cin >> type;
+	if (type == 'y')
+	{
+		ProduceAnalytical = true;
+	}
+	else
+	{
+		ProduceAnalytical = false;
+	}
+	std::cout << "Enable irradiation? (y, n)";
+	std::cin >> type;
+	if (type == 'y')
+	{
+		EnableIrradiation = true;
+		std::cout << "Enable shadows? (y, n)";
+		std::cin >> type;
+		if (type == 'n')
 		{
-		case 'f':
-			s_type = full;
-			break;
-		case 't':
-			s_type = thompson_opacity;
-			break;
-		case 'a':
-			s_type = analytical;
-			break;
-		}
-		cout << "Produce analytical solution? (y, n)";
-		cin >> type;
-		if (type == 'y')
-		{
-			ProduceAnalytical = true;
+			EnableShadows = false;
 		}
 		else
 		{
-			ProduceAnalytical = false;
-		}
-		cout << "Enable irradiation? (y, n)";
-		cin >> type;
-		if (type == 'y')
-		{
-			EnableIrradiation = true;
-			cout << "Enable shadows? (y, n)";
-			cin >> type;
-			if (type == 'n')
+			EnableShadows = true;
+			std::cout << "Enable corona formation? (y, n)";
+			std::cin >> type;
+			if (type == 'y')
 			{
-				EnableShadows = false;
-			}
-			else
-			{
-				EnableShadows = true;
-				cout << "Enable corona formation? (y, n)";
-				cin >> type;
+				EnableCoronaFormation = true;
+
+				std::cout << "Enable corona vanishing? (y, n)";
+				std::cin >> type;
 				if (type == 'y')
 				{
-					EnableCoronaFormation = true;
-
-					cout << "Enable corona vanishing? (y, n)";
-					cin >> type;
-					if (type == 'y')
-					{
-						EnableCoronaVanishing = true;
-					}
-					else
-						EnableCoronaVanishing = false;
+					EnableCoronaVanishing = true;
 				}
 				else
-					EnableCoronaFormation = false;
+					EnableCoronaVanishing = false;
 			}
+			else
+				EnableCoronaFormation = false;
 		}
-		else
-			EnableIrradiation = false;
-		cout << "Please enter the number of grids for the radial coordinate.\n";
-		cin >> N_grids;
 	}
 	else
-	{
-		N_grids = stod(argv[8]);
-	}
+		EnableIrradiation = false;
+	std::cout << "Please enter the number of grids for the radial coordinate.\n";
+	std::cin >> N_grids;
 
-	if (argc == 1)
-	{
-		cout << "Please enter the evolution duration. (months)\n";
-		cin >> n; T_max = n*month;
-	}
-	else
-	{
-		T_max = stod(argv[9])*month;
-	}
 
-	cout << "Creating initial conditions...\n";
+	std::cout << "Please enter the evolution duration. (months)\n";
+	std::cin >> n; T_max = n*month;
+
+	std::cout << "Creating initial conditions...\n";
 
 	//**************************************************************************************************************
 	// Calculate steps in X space **********************************************************************************
@@ -261,7 +237,7 @@ int main(int argc, char **argv)
 	vector<double> Alpha(N_grids, 0);										// Alpha parameter
 	vector<double> R(N_grids, 0);										// Radius
 	vector<double> X(N_grids, 0);												// Radius^2
-	vector<vector<double>> Coefficient_Matrix;							// Tridiagonal matrix for implicit solution
+	vector<vector<double> > Coefficient_Matrix;							// Tridiagonal matrix for implicit solution
 	Coefficient_Matrix.resize(N_grids, vector<double>(N_grids, 0));
 	vector<double> Coefficient_C(N_grids, 0);					// C coefficient for tridiagonal matrix
 	vector<double> Coefficient_B(N_grids, 0);					// B coefficient for tridiagonal matrix
@@ -271,11 +247,11 @@ int main(int argc, char **argv)
 	vector<double> Coefficient_D_new(N_grids, 0);				// new D coefficient for tridiagonal matrix
 	double J_total = 0;													// Total angular momentum
 	double M_total = 0;													// Total mass
-	//**************************************************************************************************************
-	//**************************************************************************************************************
+																		//**************************************************************************************************************
+																		//**************************************************************************************************************
 
-	// Read opacity table ************************************************************************************************************************************
-	//********************************************************************************************************************************************************
+																		// Read opacity table ************************************************************************************************************************************
+																		//********************************************************************************************************************************************************
 	ifstream opal("table_merged.txt");
 	if (opal.is_open())
 	{
@@ -296,23 +272,20 @@ int main(int argc, char **argv)
 	}
 	else
 	{
-		cout << "Opacity table not found!\n";
+		std::cout << "Opacity table not found!\n";
 	}
 	//********************************************************************************************************************************************************
 	//********************************************************************************************************************************************************
 
 	// Create initial conditions******************************************************************************************************************************
 	//********************************************************************************************************************************************************
-	auto start = chrono::high_resolution_clock::now();
-
-	
 	double Mu = 5e10; // cm
 	double Sigma = 1e10; // 1e10 previously
-	cout << "Maximum of the initial gaussian is at " << Mu << " cm.\n";
-	cout << "Sigma of the initial gaussian is " << Sigma << " cm.\n";
+	std::cout << "Maximum of the initial gaussian is at " << Mu << " cm.\n";
+	std::cout << "Sigma of the initial gaussian is " << Sigma << " cm.\n";
 	double E_0 = NormalizationGaussian(Mu, Sigma, R_isco, R_outer, M_disk);
 
-	parallel_for(0, N_grids, [=, &E, &S, &O, &Alpha, &X, &R, &V](int i)
+	for (int i = 0; i < N_grids; i++)
 	{
 		X[i] = X_isco + i * delta_X;												// Determine grids in X space
 		R[i] = X[i] * X[i];															// Determine grids in R space
@@ -322,18 +295,18 @@ int main(int argc, char **argv)
 
 		O[i] = thompson / m_p;													// Calculate initial opacity values
 		Alpha[i] = alpha_hot;													// Initial Alpha parameter values (alpha_hot)
-		
-		//************************************************************************
-		// Calculate viscosity ***************************************************
+
+																				//************************************************************************
+																				// Calculate viscosity ***************************************************
 		V[i] = VISC_C(Alpha[i], O[i]) * pow(X[i], (4. / 3.)) * pow(S[i], (2. / 3.));
 		//************************************************************************
 		//************************************************************************
-	});
+	}
 
 
 	// Inner and outer boundary condition *******************************************************************************************
 	//*******************************************************************************************************************************
-	E[0]= 0;
+	E[0] = 0;
 	S[0] = 0;
 	//E[N_grids - 1] = 0;
 	//S[N_grids - 1] = 0;
@@ -341,15 +314,15 @@ int main(int argc, char **argv)
 	M_dot[N_grids - 2] = M_dot_N_grids;
 	//*******************************************************************************************************************************
 	//*******************************************************************************************************************************
-	
+
 	// Calculate initial values in a self-consistent way ****************************************************************************
 	//*******************************************************************************************************************************
 	for (int j = 0; j < 100; j++)
 	{
-		parallel_for(0, N_grids, [=, &E, &V, &Alpha, &O, &S, &H, &T_c, &T_eff, &V_new, &S_new](int l)
+		for (int l = 0; l < N_grids; l++)
 		{
 			T_eff[l] = EffectiveTemperature_dubus2014(E[l], R[l], V[l]);
-			T_c[l] = CentralTemperature_dubus2014(OpticalThickness(E[l], O[l]), T_eff[l],0);
+			T_c[l] = CentralTemperature_dubus2014(OpticalThickness(E[l], O[l]), T_eff[l], 0);
 
 			if (s_type == full || s_type == thompson_opacity)
 			{
@@ -412,7 +385,7 @@ int main(int argc, char **argv)
 				//************************************************************************
 				//************************************************************************
 			}
-		});
+		}
 	}
 	for (int i = 0; i < N_grids - 2; i++)
 	{
@@ -446,20 +419,18 @@ int main(int argc, char **argv)
 	//*************************************************************************************************************
 	//*************************************************************************************************************
 
-	if(ProduceAnalytical)
+	if (ProduceAnalytical)
 		ProduceAnalyticalSolutions(M_total, J_total);
-	auto end = std::chrono::high_resolution_clock::now();
-	auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-	cout << "Initial conditions created and analytical solutions produced in " <<	elapsed.count() << " ms.\n";
-	cout << "Total angular momentum is " << J_total << " g cm2 s-1.\n";
-	cout << "Total mass is " << M_total << " g.\n";
-	cout << "Specific angular momentum is " << J_total / M_total << " cm2 s-1.\n";
+	std::cout << "Initial conditions created and analytical solutions produced in " << "not supported" << " ms.\n";
+	std::cout << "Total angular momentum is " << J_total << " g cm2 s-1.\n";
+	std::cout << "Total mass is " << M_total << " g.\n";
+	std::cout << "Specific angular momentum is " << J_total / M_total << " cm2 s-1.\n";
 	//********************************************************************
 	//********************************************************************
 
-	cout << "Please enter the time step in seconds.\n";
-	cin >> delta_T;
-	
+	std::cout << "Please enter the time step in seconds.\n";
+	std::cin >> delta_T;
+
 
 
 	//*************************************************************************************************************
@@ -488,12 +459,11 @@ int main(int argc, char **argv)
 
 	ofstream file_Rhot;
 	file_Rhot.open("Rhot_T.txt", ios::out);
-	file_Rhot << 0  << "\t" << R[FindHotIndex(Alpha)] << "\n";
+	file_Rhot << 0 << "\t" << R[FindHotIndex(Alpha)] << "\n";
 	file_Rhot.close();
 	//*************************************************************************************************************
 	//*************************************************************************************************************
 	int s = 1;
-	start = chrono::high_resolution_clock::now(); // Start high resolution clock for time measurement
 	int time_index = 0;			// time index
 	double T = 0;
 	double T_corona = T_max;
@@ -504,7 +474,7 @@ int main(int argc, char **argv)
 		S[N_grids - 1] = pow(((M_dot[N_grids - 2] * delta_X / (3. * PI) + S[N_grids - 2] * V[N_grids - 2])
 			/ (VISC_C(Alpha[N_grids - 1], O[N_grids - 1]) * pow(X[N_grids - 1], (4. / 3.)))),
 			(3. / 5.));
-		V[N_grids - 1] = VISC_C(Alpha[N_grids - 1], O[N_grids - 1]) * pow(X[N_grids - 1], (4. / 3.)) 
+		V[N_grids - 1] = VISC_C(Alpha[N_grids - 1], O[N_grids - 1]) * pow(X[N_grids - 1], (4. / 3.))
 			* pow(S[N_grids - 1], (2. / 3.));
 		//*************************************************************************************************************************************************
 		//*************************************************************************************************************************************************
@@ -513,7 +483,7 @@ int main(int argc, char **argv)
 		{
 			//*************************************************************************************************************************************************
 			// Generate Tridiagonal matrix ********************************************************************************************************************
-			parallel_for(1, N_grids - 1, [=, &V, &S, &Coefficient_Matrix, &Coefficient_A, &Coefficient_B, &Coefficient_C, &Coefficient_D](int i)
+			for (int i = 1; i < N_grids - 1; i++)
 			{
 				double k = (3. / 8.) * delta_T / pow(delta_X * X[i], 2);
 				Coefficient_C[i] = -1 * k * V_new[i + 1];
@@ -523,18 +493,18 @@ int main(int argc, char **argv)
 					Coefficient_D[i] = (1 - 2 * k*V[i]) * S[i] + k * V[i - 1] * S[i - 1] + k * V[i + 1] * S[i + 1] + k * V_new[i + 1] * S_new[i + 1];
 				else
 					Coefficient_D[i] = (1 - 2 * k*V[i]) * S[i] + k * V[i - 1] * S[i - 1] + k * V[i + 1] * S[i + 1];
-				/*if (Coefficient_B[i] <= abs(Coefficient_A[i]) + abs(Coefficient_C[i]) && !Diverging)
+				/*if (Coefficient_B[i] <= fabs(Coefficient_A[i]) + fabs(Coefficient_C[i]) && !Diverging)
 				{
-					cout << "Simulation is diverging... Decreasing time step.\n";
-					delta_T = delta_T * 0.99;
-					cout << "New time step = " << delta_T << " s\n\n";
-					Diverging = true;
+				std::cout << "Simulation is diverging... Decreasing time step.\n";
+				delta_T = delta_T * 0.99;
+				std::cout << "New time step = " << delta_T << " s\n\n";
+				Diverging = true;
 				}*/
-			});
+			}
 			/*if (Diverging)
 			{
-				Diverging = false;
-				break;
+			Diverging = false;
+			break;
 			}*/
 			//*************************************************************************************************************************************************
 			//*************************************************************************************************************************************************
@@ -574,18 +544,18 @@ int main(int argc, char **argv)
 			{
 				if (MaximumLuminosityReached && EnableIrradiation)
 				{
-					if(!CoronaFormed)
-						IrradiationTemperature(L_instant, 3*R_g, 0, R, H, T_irr, true);					// Start irradiation
+					if (!CoronaFormed)
+						IrradiationTemperature(L_instant, 3 * R_g, 0, R, H, T_irr, true);					// Start irradiation
 					else
-						IrradiationTemperature(L_instant, 500*R_g, 90, R, H, T_irr, true);					// Start irradiation
+						IrradiationTemperature(L_instant, 500 * R_g, 90, R, H, T_irr, true);					// Start irradiation
 				}
 				if (MaximumLuminosityReached && EnableIrradiation && !EnableShadows)
 				{
 					IrradiationTemperature_CentralPointSource(L_instant, R, H, T_irr, EnableShadows);					// Start irradiation
 				}
-				parallel_for(0, N_grids, [=, &O, &H, &T_c, &T_eff, &V, &Alpha, &E, &S, &V_new](int l)
+				for (int l = 0; l < N_grids; l++)
 				{
-					E[l] = S_new[l] / X[l];   
+					E[l] = S_new[l] / X[l];
 					T_eff[l] = EffectiveTemperature_dubus2014(E[l], R[l], V_new[l]);
 					T_c[l] = CentralTemperature_dubus2014(OpticalThickness(E[l], O[l]), T_eff[l], T_irr[l]);
 
@@ -646,18 +616,18 @@ int main(int argc, char **argv)
 						//************************************************************************
 						//************************************************************************
 					}
-				});
+				}
 			}
 			//*************************************************************************************************************************************************
 			//*************************************************************************************************************************************************
 		}
 
-		parallel_for(0, N_grids, [=, &V, &S, &E](int i)
+		for (int i = 0; i < N_grids; i++)
 		{
 			S[i] = S_new[i];
 			V[i] = V_new[i];
 			E[i] = S[i] / X[i];
-		});
+		}
 
 		for (int i = 0; i < N_grids - 2; i++)
 		{
@@ -678,12 +648,12 @@ int main(int argc, char **argv)
 			{
 				CoronaFormed = true;
 				T_corona = T;
-				cout << "Corona formed at time T = " << T / day << " days.\n" << elapsed.count() << " ms have elapsed.\n\n";
+				std::cout << "Corona formed at time T = " << T / day << " days.\n" << "not supported" << " ms have elapsed.\n\n";
 			}
 			else if (CoronaFormed && T > T_corona + 40 * day && EnableCoronaVanishing)
 			{
 				CoronaFormed = false;
-				cout << "Corona has vanished at time T = " << T / day << " days.\n" << elapsed.count() << " ms have elapsed.\n\n";
+				std::cout << "Corona has vanished at time T = " << T / day << " days.\n" << "not supported" << " ms have elapsed.\n\n";
 			}
 		}
 		//************************************************************************************************************************************************************
@@ -697,8 +667,8 @@ int main(int argc, char **argv)
 			//************************************************************************************************************************************************************
 			if (L_instant < L_previous && !MaximumLuminosityReached && L_instant > 0.01 * L_edd)
 			{
-				cout << std::scientific;
-				cout << "Maximum luminosity reached -> L = " << L_instant << " erg/s at time T = " << T / day << " days.\n" << elapsed.count() << " ms have elapsed.\n\n";
+				std::cout << std::scientific;
+				std::cout << "Maximum luminosity reached -> L = " << L_instant << " erg/s at time T = " << T / day << " days.\n" << "not supported" << " ms have elapsed.\n\n";
 				MaximumLuminosityReached = true;
 			}
 			else if (!MaximumLuminosityReached)
@@ -750,10 +720,7 @@ int main(int argc, char **argv)
 			WriteGraphData(R, O, T, N_grids, "OvsR.txt", true);
 			//**************************************************************************************************************************
 			//**************************************************************************************************************************
-
-			end = std::chrono::high_resolution_clock::now();
-			elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-			cout << std::scientific;
+			std::cout << std::scientific;
 			J_total = 0;
 			M_total = 0;
 			for (int i = 0; i < N_grids; i++)
@@ -761,18 +728,18 @@ int main(int argc, char **argv)
 				J_total += 4 * PI * sqrt(G * M_compact) * pow(X[i], 3) * S[i] * delta_X;
 				M_total += 4 * PI * S[i] * X[i] * X[i] * delta_X;
 			}
-			cout << "Current time is           " << T / day << " days.\n";
-			cout << "Luminosity is             " << L_instant << " erg/s (i.e. " << L_instant/L_edd * 100 << " \% of Eddington luminosity).\n";
-			cout << "Total angular momentum is " << J_total << " g cm2 s-1.\n";
-			cout << "Total mass is             " << M_total << " g.\n";
-			cout << (double)T / T_max * 100 << fixed << " percent completed! " << elapsed.count() << " ms have elapsed.\n\n";
+			std::cout << "Current time is           " << T / day << " days.\n";
+			std::cout << "Luminosity is             " << L_instant << " erg/s (i.e. " << L_instant / L_edd * 100 << " \% of Eddington luminosity).\n";
+			std::cout << "Total angular momentum is " << J_total << " g cm2 s-1.\n";
+			std::cout << "Total mass is             " << M_total << " g.\n";
+			std::cout << (double)T / T_max * 100 << fixed << " percent completed! " << "not supported" << " ms have elapsed.\n\n";
 		}
 	}
-	cout << "All done!";
+	std::cout << "All done!";
 	if (argc == 1)
 	{
-		cin.get();
-		cin.get();
+		std::cin.get();
+		std::cin.get();
 	}
 	return 0;
 }
@@ -793,10 +760,10 @@ void WriteGraphData(double* X, double* Y, int length, string filename, bool appe
 		file = fopen(filename.c_str(), "w");
 	else
 		file = fopen(filename.c_str(), "a");
-	parallel_for(0, length, [=, &file](int i)
+	for (int i = 0; i < length; i++)
 	{
 		fprintf(file, "%lf\t%lf\n", X[i], Y[i]);
-	});
+	}
 	fprintf(file, "\n");
 	fclose(file);
 }
@@ -821,9 +788,9 @@ void WriteGraphData(vector<double> X, vector<double> Y, double T, int length, st
 		file = fopen(filename.c_str(), "w");
 	else
 		file = fopen(filename.c_str(), "a");
-	for(int i=0; i < length; i++)
+	for (int i = 0; i < length; i++)
 	{
-		fprintf(file, "%lf\t%lf\t%lf\n", T/day, X[i], Y[i]);
+		fprintf(file, "%lf\t%lf\t%lf\n", T / day, X[i], Y[i]);
 	}
 	fprintf(file, "\n");
 	fclose(file);
@@ -837,7 +804,7 @@ double OpticalThickness(double SurfaceDensity, double opacity)
 double BB_Luminosity(vector<double> T_eff, vector<double> X)
 {
 	double L = 0;
-	for(int i = 0; i < N_grids; i++)
+	for (int i = 0; i < N_grids; i++)
 	{
 		L += pow(X[i], 3) * pow(T_eff[i], 4) * a * 4 * PI * delta_X;
 	}
@@ -859,21 +826,21 @@ void ExtractSpectrum(double* T, double* X, double delta_X, int N_grids, double m
 	int numberofchannels = (maxEnergyEV - minEnergyEV) / resolutionEV;
 	double* I_bb = new double[numberofchannels];
 	double* eV = new double[numberofchannels];
-	parallel_for(0, numberofchannels, [=](int i)
+	for (int i = 0; i < numberofchannels; i++)
 	{
 		I_bb[i] = 0;
 		eV[i] = minEnergyEV + resolutionEV * i;
-	});
-	parallel_for(0, N_grids - 2, [=](int i)
+	}
+	for (int i = 0; i < N_grids - 2; i++)
 	{
-		parallel_for(0, numberofchannels, [=](int j)
+		for (int j = 0; j < numberofchannels; j++)
 		{
-			if(T[i + 1] != 0)
+			if (T[i + 1] != 0)
 				I_bb[j] += (2 * h * pow(eVtoHz(eV[j]), 3) / pow(c, 2)) / (exp((h * eVtoHz(eV[j])) /
-					(k * T[i + 1])) - 1)
-					* 4 * PI * pow(X[i], 3) * delta_X; // infinitesimal area
-		});
-	});
+				(k * T[i + 1])) - 1)
+				* 4 * PI * pow(X[i], 3) * delta_X; // infinitesimal area
+		}
+	}
 	WriteGraphData(eV, I_bb, numberofchannels, "powerspectrum.txt", append);
 }
 
@@ -882,11 +849,11 @@ double GetLuminosity(vector<double> T, vector<double> X, double minEnergyEV, dou
 	int numberofchannels = (maxEnergyEV - minEnergyEV) / resolutionEV;
 	double* I_bb = new double[numberofchannels];
 	double* eV = new double[numberofchannels];
-	parallel_for(0, numberofchannels, [=](int i)
+	for (int i = 0; i < numberofchannels; i++)
 	{
 		I_bb[i] = 0;
 		eV[i] = minEnergyEV + resolutionEV * i;
-	});
+	}
 	for (int i = 0; i < N_grids; i++)
 	{
 		for (int j = 0; j < numberofchannels; j++)
@@ -910,23 +877,23 @@ void IrradiationTemperature_CentralPointSource(double LUMINOSITY, vector<double>
 	vector<int> Shadows(N_grids, 0);
 	if (ShadowEnabled)
 		GetShadows(Shadows, R, H, 0, 0);									// Get shadows 
-	//else
-		//LUMINOSITY = 10 * LUMINOSITY;										// Increase luminosity if corona has been formed
-	
-	parallel_for(0, N_grids - 1, [=, &T_irr](int i)
+																			//else
+																			//LUMINOSITY = 10 * LUMINOSITY;										// Increase luminosity if corona has been formed
+
+	for (int i = 0; i< N_grids - 1; i++)
 	{
 		if (Shadows[i] == 0)
 		{
 			double d_2 = R[i] * R[i] + H[i] * H[i];						// Distance from central point source
 			double theta = atan(H[i + 1] / R[i + 1]);					// elevation of disk element
-			double tan_phi = (H[i + 1] - H[i]) / (R[i + 1] - R[i]);		
+			double tan_phi = (H[i + 1] - H[i]) / (R[i + 1] - R[i]);
 			double phi = atan(tan_phi);									// slope angle of disk element
-			double Flux_disk = LUMINOSITY / (d_2 * 4 * PI) * sin(abs(theta - phi));
+			double Flux_disk = LUMINOSITY / (d_2 * 4 * PI) * sin(fabs(theta - phi));
 			T_irr[i] = pow((Flux_disk / a), 0.25);
 		}
 		else
 			T_irr[i] = 0;
-	});
+	}
 
 }
 void IrradiationTemperature(double LUMINOSITY, double R_corona, double Theta_corona, vector<double> R, vector<double> H, vector<double> &T_irr, bool ShadowEnabled)
@@ -935,11 +902,11 @@ void IrradiationTemperature(double LUMINOSITY, double R_corona, double Theta_cor
 	vector<int> Shadows(N_grids, 0);
 	if (ShadowEnabled)
 		GetShadows(Shadows, R, H, R_corona, Theta_corona);									// Get shadows 
-																			//else
-	if(R_corona > 5*R_g)
+																							//else
+	if (R_corona > 5 * R_g)
 		LUMINOSITY = 100 * LUMINOSITY;										// Increase luminosity if corona has been formed
 
-	parallel_for(0, N_grids - 1, [=, &T_irr](int i)
+	for (int i = 0; i< N_grids - 1; i++)
 	{
 		if (Shadows[i] == 0)
 		{
@@ -947,10 +914,10 @@ void IrradiationTemperature(double LUMINOSITY, double R_corona, double Theta_cor
 			double theta = atan((H[i + 1] - R_corona*sin(Theta_corona)) / (R[i + 1] - R_corona*cos(Theta_corona)));					// elevation of disk element
 			double tan_phi = (H[i + 1] - H[i]) / (R[i + 1] - R[i]);
 			double phi = atan(tan_phi);									// slope angle of disk element
-			
+
 			double lambda = Theta_corona - theta;
 			double psi = theta - phi + PI / 2;
-			double Flux_disk = abs(LUMINOSITY / (d_2 * 4 * PI) * cos(lambda) * cos(psi));
+			double Flux_disk = fabs(LUMINOSITY / (d_2 * 4 * PI) * cos(lambda) * cos(psi));
 			if (Flux_disk > 0)
 				T_irr[i] = pow((Flux_disk / a), 0.25);
 			else
@@ -958,30 +925,30 @@ void IrradiationTemperature(double LUMINOSITY, double R_corona, double Theta_cor
 		}
 		else
 			T_irr[i] = 0;
-	});
+	}
 
 }
 
 void GetShadows(vector<int> &Shadows, vector<double> R, vector<double> H, double R_corona, double Theta_corona)
 {
 	Shadows[0] = 0;
-	parallel_for(0, N_grids - 1, [=, &Shadows](int i)
+	for (int i = 0; i< N_grids - 1; i++)
 	{
 		int n = 0;
 		for (int j = 0; j < i + 1; j++)
 		{
-			if (atan((H[i + 1] - R_corona * sin(Theta_corona)) / abs(R[i + 1] - R_corona * cos(Theta_corona))) <
-				atan((H[j] - R_corona * sin(Theta_corona)) / abs(R[j] - R_corona * cos(Theta_corona))))
+			if (atan((H[i + 1] - R_corona * sin(Theta_corona)) / fabs(R[i + 1] - R_corona * cos(Theta_corona))) <
+				atan((H[j] - R_corona * sin(Theta_corona)) / fabs(R[j] - R_corona * cos(Theta_corona))))
 			{
 				n++;
-			}	
+			}
 		}
 		if (n > 3)
 		{
 			Shadows[i + 1] = 1;
 		}
 		else Shadows[i + 1] = 0;
-	});
+	}
 }
 
 double eVtoHz(double eV)
@@ -1020,18 +987,16 @@ double VISC_C(double alpha, double opacity)
 
 double average(double numbers[], int size) {
 	double sum = 0;
-	parallel_for(0, size, [=, &sum](int i)
+	for (int i = 0; i < size; i++)
 	{
-		if(numbers[i] < 100)
+		if (numbers[i] < 100)
 			sum += numbers[i];
-	});
+	}
 	return sum / (double)size;
 }
 
 double T_critical(double T_irr, double R)
 {
-	if (T_c_max(T_irr, R) == std::numeric_limits<double>::infinity())
-		return 0;
 	return 0.5 * (T_c_max(T_irr, R) + T_c_min(T_irr, R));
 }
 double T_c_max(double T_irr, double R)
@@ -1069,18 +1034,18 @@ double CentralTemperature_dubus2014(double tau, double T_eff, double T_irr)
 
 void RadiationPressure(double* P_rad, double* T_c)
 {
-	parallel_for(0, N_grids, [=](int i)
+	for (int i = 0; i < N_grids; i++)
 	{
 		P_rad[i] = 4. / 3. * a / c /* rad_const*/ * pow(T_c[i], 4);
-	});
+	}
 }
 
 void GasPressure(double* P_gas, double* E, double* H, double* T_c, double* Alpha)
 {
-	parallel_for(0, N_grids, [=](int i)
+	for (int i = 0; i < N_grids; i++)
 	{
 		P_gas[i] = ((E[i] / H[i]) * k * T_c[i]) / (mu_p(Alpha[i]) * m_p);
-	});
+	}
 }
 
 void ScaleHeight_FrankKingRaine(double * H, double * E, double * T_c, double* M_dot, double* R, double* Alpha)
@@ -1092,9 +1057,9 @@ void ScaleHeight_FrankKingRaine(double * H, double * E, double * T_c, double* M_
 
 	for (int j = 0; j < 10; j++)
 	{
-		parallel_for(0, N_grids, [=](int i)
+		for (int i = 0; i < N_grids; i++)
 		{
-			if (P_gas[i]*10 < P_rad[i])
+			if (P_gas[i] * 10 < P_rad[i])
 			{
 				H[i] = ((3 * R_isco) / (4 * 0.1)) * (M_dot[i] / M_dot_edd) * (1 - pow(R_isco / R[i], 0.5));
 			}
@@ -1102,7 +1067,7 @@ void ScaleHeight_FrankKingRaine(double * H, double * E, double * T_c, double* M_
 			{
 				H[i] = sqrt((T_c[i] * k * pow(R[i], 3)) / (mu_p(Alpha[i]) * m_p * G * M_compact));
 			}
-		});
+		}
 		GasPressure(P_gas, E, H, T_c, Alpha);
 	}
 }
@@ -1124,17 +1089,17 @@ double TimeDependentCoronaRadius(double T_current, double T_corona, double T_ris
 	else return R_isco;
 }
 
-void printmatrix(vector<vector<double>> matrix, int rows, int columns)
+void printmatrix(vector<vector<double> > matrix, int rows, int columns)
 {
 	for (int i = 0; i < rows; i++)
 	{
 		for (int j = 0; j < columns; j++)
 		{
-			cout << setprecision(1);
-			cout << std::setw(8);
-			cout << matrix[i][j] << " ";
+			std::cout << setprecision(1);
+			std::cout << std::setw(8);
+			std::cout << matrix[i][j] << " ";
 		}
-		cout << "\n";
+		std::cout << "\n";
 	}
 }
 
@@ -1142,10 +1107,10 @@ void printmatrix(double* matrix, int rows)
 {
 	for (int i = 0; i < rows; i++)
 	{
-			cout << setprecision(1);
-			cout << std::setw(8);
-			cout << matrix[i];
-		cout << "\n";
+		std::cout << setprecision(1);
+		std::cout << std::setw(8);
+		std::cout << matrix[i];
+		std::cout << "\n";
 	}
 }
 
@@ -1193,13 +1158,13 @@ void ProduceAnalyticalSolutions(double M_disk, double J_disk)
 		double time_step = T_max / N_samples;
 		double grid_step = X_outer / N_grids;
 
-		cout << "In T = " << T_max / month << " months the disk will extend to " << r_0 * pow(1 + T_max / t_0, 2 / (5 * q - 2 * p + 4)) << " cm.\n";
+		std::cout << "In T = " << T_max / month << " months the disk will extend to " << r_0 * pow(1 + T_max / t_0, 2 / (5 * q - 2 * p + 4)) << " cm.\n";
 
-		parallel_for(0, N_samples, [=](int i)
+		for (int i = 0; i < N_samples; i++)
 		{
 			time_array[i] = time_step * (i + 1);
-		});
-		parallel_for(0, N_grids, [=, &R, &E, &V, &T_c, &T_eff, &Tc_max, &Tc_min](int i)
+		}
+		for (int i = 0; i < N_grids; i++)
 		{
 			R[i] = pow(X_isco + i * grid_step, 2);
 			E[i] = E_0 * (k * pow(R[i] / r_0, -p / (q + 1)) * pow(1 - pow(R[i] / r_0, 2 - p / (q + 1)), 1 / q));
@@ -1214,19 +1179,20 @@ void ProduceAnalyticalSolutions(double M_disk, double J_disk)
 			Tc_max[i] = T_c_max(0, R[i]);
 			Tc_min[i] = T_c_min(0, R[i]);
 
-			if (isnan(E[i]))
+			if (std::isnan(E[i]))
 				E[i] = 0;
-			if (isnan(V[i]))
+			if (std::isnan(V[i]))
 				V[i] = 0;
-			if (isnan(T_eff[i]))
+			if (std::isnan(T_eff[i]))
 				T_eff[i] = 0;
-			if (isnan(T_c[i]))
+			if (std::isnan(T_c[i]))
 				T_c[i] = 0;
-			if (isnan(Tc_max[i]))
+			if (std::isnan(Tc_max[i]))
 				Tc_max[i] = 0;
-			if (isnan(Tc_min[i]))
+			if (std::isnan(Tc_min[i]))
 				Tc_min[i] = 0;
-		});
+
+		}
 
 		ofstream file;
 		char file_name[30];
@@ -1247,7 +1213,7 @@ void ProduceAnalyticalSolutions(double M_disk, double J_disk)
 		{
 			double R_out = r_0 * pow(1 + time_array[i] / t_0, 2 / (5 * q - 2 * p + 4));
 
-			parallel_for(0, N_grids, [=, &R, &E, &V, &T_c, &T_eff, &Tc_max, &Tc_min](int j)
+			for (int j = 0; j < N_grids; j++)
 			{
 				E[j] = E_0 * k * pow(1 + time_array[i] / t_0, -5 / (5 * q - 2 * p + 4))
 					* pow(R[j] / R_out, -p / (q + 1)) * pow(1 - pow(R[j] / R_out, 2 - p / (q + 1)), 1 / q);
@@ -1260,19 +1226,19 @@ void ProduceAnalyticalSolutions(double M_disk, double J_disk)
 				T_c[j] = CentralTemperature_dubus2014(OpticalThickness(E[j], thompson / m_p), T_eff[j], 0);
 				Tc_max[j] = T_c_max(0, R[j]);
 				Tc_min[j] = T_c_min(0, R[j]);
-				if (isnan(E[j]))
+				if (std::isnan(E[j]))
 					E[j] = 0;
-				if (isnan(V[j]))
+				if (std::isnan(V[j]))
 					V[j] = 0;
-				if (isnan(T_eff[j]))
+				if (std::isnan(T_eff[j]))
 					T_eff[j] = 0;
-				if (isnan(T_c[j]))
+				if (std::isnan(T_c[j]))
 					T_c[j] = 0;
-				if (isnan(Tc_max[j]))
+				if (std::isnan(Tc_max[j]))
 					Tc_max[j] = 0;
-				if (isnan(Tc_min[j]))
+				if (std::isnan(Tc_min[j]))
 					Tc_min[j] = 0;
-			});
+			}
 
 			file.open(file_name, ios::app);
 			file << time_array[i] / day << "\t" << 0.1 * (G * M_compact) / (2 * R_isco) *
