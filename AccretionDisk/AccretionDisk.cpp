@@ -62,7 +62,7 @@ bool CoronaFormed = false;
 bool MaximumLuminosityReached = false;
 double R_Corona;
 double L_Corona;
-double T_Corona;
+double T_Corona_Percent;
 int trunc_radius_index = 0;
 bool Diverging = false;
 int N_samples = 500;
@@ -168,7 +168,7 @@ int main(int argc, char **argv)
 	char type = argv[1][0];
 	R_Corona = atof(argv[2]) * R_g;
 	L_Corona = atof(argv[3]);
-	T_Corona = atof(argv[4]);
+	T_Corona_Percent = atof(argv[4]);
 	N_grids = atoi(argv[5]);
 	T_max = atof(argv[6]) * month;
 	delta_T = atof(argv[7]);
@@ -184,7 +184,7 @@ int main(int argc, char **argv)
 	std::cout << "Simulation type            = " << type << ".\n";
 	std::cout << "Corona height              = " << R_Corona << " cm.\n";
 	std::cout << "Corona luminosity          = " << L_Corona << " times current luminosity.\n";
-	std::cout << "Corona formation time      = " << T_Corona << " \% of Eddington luminosity.\n";
+	std::cout << "Corona formation time      = " << T_Corona_Percent << " \% of Eddington luminosity.\n";
 	std::cout << "Spatial resolution         = " << N_grids << " grids.\n";
 	std::cout << "Temporal resolution        = " << delta_T << " s.\n";
 	std::cout << "Simulation lengtgh         = " << T_max / month << " months.\n";
@@ -292,8 +292,8 @@ int main(int argc, char **argv)
 		O[i] = thompson / m_p;													// Calculate initial opacity values
 		Alpha[i] = alpha_hot;													// Initial Alpha parameter values (alpha_hot)
 
-																				//************************************************************************
-																				// Calculate viscosity ***************************************************
+		//************************************************************************
+		// Calculate viscosity ***************************************************
 		V[i] = VISC_C(Alpha[i], O[i]) * pow(X[i], (4. / 3.)) * pow(S[i], (2. / 3.));
 		//************************************************************************
 		//************************************************************************
@@ -633,7 +633,7 @@ int main(int argc, char **argv)
 		//************************************************************************************************************************************************************
 		if (EnableCoronaFormation)
 		{
-			if (MaximumLuminosityReached && L_instant < 0.001 * L_edd && !CoronaFormed && T < T_corona)
+			if (MaximumLuminosityReached && L_instant < (T_Corona_Percent / 100) * L_edd && !CoronaFormed && T < T_corona)
 			{
 				CoronaFormed = true;
 				T_corona = T;
