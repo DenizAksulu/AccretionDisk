@@ -50,7 +50,7 @@ static double T_max;
 static double T_L = 99999999999;
 static double L_instant = 0, L_BB = 0, L_HEXTE = 0, L_Optical = 0;
 static double L_previous = 0;
-static double alpha_hot = 0.2; // was 0.1 before
+static double alpha_hot = 0.1; // was 0.1 before
 static double alpha_cold = 0.033;
 static double opacity[19][88];
 static double logR[19] = { -8, -7.5, -7, -6.5, -6, -5.5, -5, -4.5, -4, -3.5, -3, -2.5, -2, -1.5, -1, -0.5, 0, 0.5, 1 };
@@ -60,7 +60,9 @@ static double M_dot_edd = 0;
 static double R_g = 0;
 bool CoronaFormed = false;
 bool MaximumLuminosityReached = false;
-double R_Corona, Theta_Corona;
+double R_Corona;
+double L_Corona;
+double T_Corona;
 int trunc_radius_index = 0;
 bool Diverging = false;
 int N_samples = 500;
@@ -100,6 +102,9 @@ double Viscosity(double T_c, double alpha, double H);
 void IrradiationTemperature_CentralPointSource(double LUMINOSITY, vector<double> R, vector<double> H, vector<double> &T_irr, bool ShadowEnabled);
 void IrradiationTemperature(double LUMINOSITY, double R_corona, double Theta_corona, vector<double> R, vector<double> H, vector<double> &T_irr, bool ShadowEnabled);
 void GetShadows(vector<int> &Shadows, vector<double> R, vector<double> H, double R_corona, double Theta_corona);
+void IrradiationTemperature(double LUMINOSITY, double R_corona, vector<double> R, vector<double> H, vector<double> &T_irr, bool ShadowEnabled);
+void GetShadows(vector<int> &Shadows, vector<double> R, vector<double> H, double R_corona, double Theta_corona);
+void GetShadows(vector<int> &Shadows, vector<double> R, vector<double> H, double R_corona);
 
 void ProduceAnalyticalSolutions(double M_disk, double J_disk);
 
@@ -115,16 +120,37 @@ bool EnableCoronaVanishing = false;
 int main(int argc, char **argv)
 {
 	double n; // parameter for input
-	std::cout << "Accretion disk simulation with parallel CPU computing.\n\n";
-	std::cout << "Please enter the mass of the compact object. (M_solar)\n";
-	std::cin >> n;
-	M_compact = n * M_solar;
-	std::cout << "Please enter the mass of the disk. (M_solar)\n";
-	std::cin >> n;
-	M_disk = n * M_solar;
-	std::cout << "Please enter the accretion rate. (M_solar s-1)\n";
-	std::cin >> n;
-	M_dot_N_grids = n * M_solar;
+
+	if (argc == 2)
+	{
+		if (argv[1][0] == '-' && argv[1][1] == 'h')
+		{
+			std::cout << "Parameter list:\n";
+			std::cout << "1) Simulaton type (f, t, a)\n";
+			std::cout << "2) Corona height (in R_g)\n";
+			std::cout << "3) Corona luminosity (n times the current luminosity)\n";
+			std::cout << "4) Corona formation time (n% of eddington luminosity)\n";
+			std::cout << "5) Grid number (integer)\n";
+			std::cout << "6) Simulation length (in months)\n";
+			std::cout << "7) Time step (in seconds)\n";
+			return 1;
+		}
+	}
+	else if (argc != 8)
+	{
+		std::cout << "Wrong command line parameters.";
+		return 1;
+	}
+	std::cout << "Accretion disk simulation.\n\n";
+	//std::cout << "Please enter the mass of the compact object. (M_solar)\n";
+	//std::cin >> n;
+	M_compact = 10 * M_solar;
+	//std::cout << "Please enter the mass of the disk. (M_solar)\n";
+	//std::cin >> n;
+	M_disk = 1e-7 * M_solar;
+	//std::cout << "Please enter the accretion rate. (M_solar s-1)\n";
+	//std::cin >> n;
+	M_dot_N_grids = 1e-18 * M_solar;
 
 	R_g = 2 * G * M_compact / pow(c, 2);
 
@@ -136,19 +162,34 @@ int main(int argc, char **argv)
 	X_outer = sqrt(R_outer);
 	L_edd = 1.3e38 * (M_compact / M_solar);
 	M_dot_edd = L_edd * 2 * R_isco / (G* M_compact);		// Luminosity in ergs/s
-															//*********************************************************************************************************
-															//*********************************************************************************************************
+	//*********************************************************************************************************
+	//*********************************************************************************************************
+
+	char type = argv[1][0];
+	R_Corona = atof(argv[2]) * R_g;
+	L_Corona = atof(argv[3]);
+	T_Corona = atof(argv[4]);
+	N_grids = atoi(argv[5]);
+	T_max = atof(argv[6]) * month;
+	delta_T = atof(argv[7]);
+
 
 	std::cout << "Mass of the compact object = " << M_compact << " g.\n";
 	std::cout << "Mass of the disk           = " << M_disk << " g.\n";
+	std::cout << "Schwartzschild radius      = " << R_g << " cm.\n";
 	std::cout << "Innermost stable orbit     = " << R_isco << " cm.\n";
 	std::cout << "Outer radius               = " << R_outer << " cm.\n";
 	std::cout << "Accretion rate             = " << M_dot_N_grids << " g s-1.\n";
 	std::cout << "Eddington Luminosity       = " << L_edd << " erg s-1.\n";
+	std::cout << "Simulation type            = " << type << ".\n";
+	std::cout << "Corona height              = " << R_Corona << " cm.\n";
+	std::cout << "Corona luminosity          = " << L_Corona << " times current luminosity.\n";
+	std::cout << "Corona formation time      = " << T_Corona << " \% of Eddington luminosity.\n";
+	std::cout << "Spatial resolution         = " << N_grids << " grids.\n";
+	std::cout << "Temporal resolution        = " << delta_T << " s.\n";
+	std::cout << "Simulation lengtgh         = " << T_max / month << " months.\n";
 
-	std::cout << "Simulation type? (f, t, a)"; // f = realistic opacities, t = tompson opacities, a = analytical
-	char type;
-	std::cin >> type;
+	//std::cin >> type;
 	switch (type)
 	{
 	case 'f':
@@ -161,57 +202,12 @@ int main(int argc, char **argv)
 		s_type = analytical;
 		break;
 	}
-	std::cout << "Produce analytical solution? (y, n)";
-	std::cin >> type;
-	if (type == 'y')
-	{
-		ProduceAnalytical = true;
-	}
-	else
-	{
-		ProduceAnalytical = false;
-	}
-	std::cout << "Enable irradiation? (y, n)";
-	std::cin >> type;
-	if (type == 'y')
-	{
-		EnableIrradiation = true;
-		std::cout << "Enable shadows? (y, n)";
-		std::cin >> type;
-		if (type == 'n')
-		{
-			EnableShadows = false;
-		}
-		else
-		{
-			EnableShadows = true;
-			std::cout << "Enable corona formation? (y, n)";
-			std::cin >> type;
-			if (type == 'y')
-			{
-				EnableCoronaFormation = true;
 
-				std::cout << "Enable corona vanishing? (y, n)";
-				std::cin >> type;
-				if (type == 'y')
-				{
-					EnableCoronaVanishing = true;
-				}
-				else
-					EnableCoronaVanishing = false;
-			}
-			else
-				EnableCoronaFormation = false;
-		}
-	}
-	else
-		EnableIrradiation = false;
-	std::cout << "Please enter the number of grids for the radial coordinate.\n";
-	std::cin >> N_grids;
-
-
-	std::cout << "Please enter the evolution duration. (months)\n";
-	std::cin >> n; T_max = n*month;
+	ProduceAnalytical = false;
+	EnableIrradiation = true;
+	EnableShadows = true;		
+	EnableCoronaFormation = true;
+	EnableCoronaVanishing = true;
 
 	std::cout << "Creating initial conditions...\n";
 
@@ -247,11 +243,11 @@ int main(int argc, char **argv)
 	vector<double> Coefficient_D_new(N_grids, 0);				// new D coefficient for tridiagonal matrix
 	double J_total = 0;													// Total angular momentum
 	double M_total = 0;													// Total mass
-																		//**************************************************************************************************************
-																		//**************************************************************************************************************
+	//**************************************************************************************************************
+	//**************************************************************************************************************
 
-																		// Read opacity table ************************************************************************************************************************************
-																		//********************************************************************************************************************************************************
+	// Read opacity table ************************************************************************************************************************************
+	//********************************************************************************************************************************************************
 	ifstream opal("table_merged.txt");
 	if (opal.is_open())
 	{
@@ -308,8 +304,6 @@ int main(int argc, char **argv)
 	//*******************************************************************************************************************************
 	E[0] = 0;
 	S[0] = 0;
-	//E[N_grids - 1] = 0;
-	//S[N_grids - 1] = 0;
 	M_dot[N_grids - 1] = M_dot_N_grids;
 	M_dot[N_grids - 2] = M_dot_N_grids;
 	//*******************************************************************************************************************************
@@ -428,11 +422,6 @@ int main(int argc, char **argv)
 	//********************************************************************
 	//********************************************************************
 
-	std::cout << "Please enter the time step in seconds.\n";
-	std::cin >> delta_T;
-
-
-
 	//*************************************************************************************************************
 	// File operations ********************************************************************************************
 	ofstream file;
@@ -545,9 +534,9 @@ int main(int argc, char **argv)
 				if (MaximumLuminosityReached && EnableIrradiation)
 				{
 					if (!CoronaFormed)
-						IrradiationTemperature(L_instant, 3 * R_g, 0, R, H, T_irr, true);					// Start irradiation
+						IrradiationTemperature(L_instant, 0, R, H, T_irr, true);					// Start irradiation
 					else
-						IrradiationTemperature(L_instant, 500 * R_g, 90, R, H, T_irr, true);					// Start irradiation
+						IrradiationTemperature(L_Corona * L_instant, R_Corona, R, H, T_irr, true);					// Start irradiation
 				}
 				if (MaximumLuminosityReached && EnableIrradiation && !EnableShadows)
 				{
@@ -644,7 +633,7 @@ int main(int argc, char **argv)
 		//************************************************************************************************************************************************************
 		if (EnableCoronaFormation)
 		{
-			if (MaximumLuminosityReached && L_instant < 0.003 * L_edd && !CoronaFormed && T < T_corona)
+			if (MaximumLuminosityReached && L_instant < 0.001 * L_edd && !CoronaFormed && T < T_corona)
 			{
 				CoronaFormed = true;
 				T_corona = T;
@@ -927,6 +916,59 @@ void IrradiationTemperature(double LUMINOSITY, double R_corona, double Theta_cor
 			T_irr[i] = 0;
 	}
 
+}
+
+void IrradiationTemperature(double LUMINOSITY, double R_corona, vector<double> R, vector<double> H, vector<double> &T_irr, bool ShadowEnabled)
+{
+	vector<int> Shadows(N_grids, 0);
+	if (ShadowEnabled)
+		GetShadows(Shadows, R, H, R_corona);									// Get shadows 
+																				//else
+	for (int i = 0; i < N_grids - 1; i++)
+	{
+		if (Shadows[i] == 0)
+		{
+			double d_2 = R[i] * R[i] + (H[i] - R_corona) * (H[i] - R_corona);		// Distance from point source
+
+			double tan_phi = (H[i + 1] - H[i]) / (R[i + 1] - R[i]);
+			double phi = atan(tan_phi);									// slope angle of disk element
+
+			double beta = atan((H[i] - R_corona) / R[i]);
+
+			double lambda = phi - beta;
+
+			double Flux_disk = fabs(LUMINOSITY / (d_2 * 4 * PI) * sin(lambda));
+
+			if (Flux_disk > 0)
+				T_irr[i] = pow((Flux_disk / a), 0.25);
+			else
+				T_irr[i] = 0;
+		}
+		else
+			T_irr[i] = 0;
+	}
+}
+
+void GetShadows(vector<int> &Shadows, vector<double> R, vector<double> H, double R_corona)
+{
+	for (int i = 0; i < N_grids - 1; i++)
+	{
+		int n = 0;
+		for (int j = 0; j < i + 1; j++)
+		{
+			if (atan((H[i + 1] - R_corona) / R[i + 1]) <
+				atan((H[j] - R_corona) / R[j]))
+			{
+				n++;
+			}
+		}
+		if (n > 3)
+		{
+			Shadows[i + 1] = 1;
+		}
+		else Shadows[i + 1] = 0;
+	}
+	Shadows[0] = 0;
 }
 
 void GetShadows(vector<int> &Shadows, vector<double> R, vector<double> H, double R_corona, double Theta_corona)
