@@ -102,7 +102,9 @@ void printmatrix(double* matrix, int rows);
 double Viscosity(double T_c, double alpha, double H);
 void IrradiationTemperature_CentralPointSource(double LUMINOSITY, vector<double> R, vector<double> H, vector<double> &T_irr, bool ShadowEnabled);
 void IrradiationTemperature(double LUMINOSITY, double R_corona, double Theta_corona, vector<double> R, vector<double> H, vector<double> &T_irr, bool ShadowEnabled);
+void IrradiationTemperature(double LUMINOSITY, double R_corona, vector<double> R, vector<double> H, vector<double> &T_irr, bool ShadowEnabled);
 void GetShadows(vector<int> &Shadows, vector<double> R, vector<double> H, double R_corona, double Theta_corona);
+void GetShadows(vector<int> &Shadows, vector<double> R, vector<double> H, double R_corona);
 
 void ProduceAnalyticalSolutions(double M_disk, double J_disk);
 
@@ -575,9 +577,9 @@ int main(int argc, char **argv)
 				if (MaximumLuminosityReached && EnableIrradiation)
 				{
 					if(!CoronaFormed)
-						IrradiationTemperature(L_instant, 3*R_g, 0, R, H, T_irr, true);					// Start irradiation
+						IrradiationTemperature(L_instant, 0, R, H, T_irr, true);					// Start irradiation
 					else
-						IrradiationTemperature(L_instant, 500*R_g, 90, R, H, T_irr, true);					// Start irradiation
+						IrradiationTemperature(L_instant, 500*R_g, R, H, T_irr, true);					// Start irradiation
 				}
 				if (MaximumLuminosityReached && EnableIrradiation && !EnableShadows)
 				{
@@ -960,6 +962,61 @@ void IrradiationTemperature(double LUMINOSITY, double R_corona, double Theta_cor
 			T_irr[i] = 0;
 	});
 
+}
+
+void IrradiationTemperature(double LUMINOSITY, double R_corona, vector<double> R, vector<double> H, vector<double> &T_irr, bool ShadowEnabled)
+{
+	vector<int> Shadows(N_grids, 0);
+	if (ShadowEnabled)
+		GetShadows(Shadows, R, H, R_corona);									// Get shadows 
+																							//else
+	if (R_corona > 5 * R_g)
+		LUMINOSITY = 100 * LUMINOSITY;										// Increase luminosity if corona has been formed
+	parallel_for(0, N_grids - 1, [=, &T_irr](int i)
+	{
+		if (Shadows[i] == 0)
+		{
+			double d_2 = R[i] * R[i] + (H[i] - R_corona) * (H[i] - R_corona);		// Distance from point source
+			
+			double tan_phi = (H[i + 1] - H[i]) / (R[i + 1] - R[i]);
+			double phi = atan(tan_phi);									// slope angle of disk element
+			
+			double beta = atan((H[i] - R_corona) / R[i]);
+			
+			double lambda = phi - beta;
+			
+			double Flux_disk = abs(LUMINOSITY / (d_2 * 4 * PI) * sin(lambda));
+			
+			if (Flux_disk > 0)
+				T_irr[i] = pow((Flux_disk / a), 0.25);
+			else
+				T_irr[i] = 0;
+		}
+		else
+			T_irr[i] = 0;
+	});
+}
+
+void GetShadows(vector<int> &Shadows, vector<double> R, vector<double> H, double R_corona)
+{
+	parallel_for(0, N_grids - 1, [=, &Shadows](int i)
+	{
+		int n = 0;
+		for (int j = 0; j < i + 1; j++)
+		{
+			if (atan((H[i + 1] - R_corona) / R[i + 1]) <
+				atan((H[j] - R_corona) / R[j]))
+			{
+				n++;
+			}
+		}
+		if (n > 3)
+		{
+			Shadows[i + 1] = 1;
+		}
+		else Shadows[i + 1] = 0;
+	});
+	Shadows[0] = 0;
 }
 
 void GetShadows(vector<int> &Shadows, vector<double> R, vector<double> H, double R_corona, double Theta_corona)
